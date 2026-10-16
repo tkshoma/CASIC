@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CASIC Tester</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 左側 -->
+        <div class="left-pane">
+            <div class="pane-header">
+                <h3>Code <span style="font-size:12px; font-weight:normal; color:#888;">(行番号クリックでその行だけ実行)</span></h3>
+                <span id="code-stats" class="stats">Lines: 0 | Length: 0 | Pos: 0</span>
+            </div>
+            <div id="code-container" class="editor-container">
+                <div id="line-numbers" class="line-numbers"></div>
+                <div class="editor-body">
+                    <div id="code-highlight" class="highlight-layer"></div>
+                    <textarea id="code" class="code-textarea" spellcheck="false" placeholder="ここにCASICのコードを書く..."></textarea>
+                </div>
+            </div>
+            
+            <div class="middle-controls">
+                <div class="middle-box" id="box-sub1">
+                    <h3>追加実行1</h3>
+                    <div id="sub-code1-container" class="editor-container sub-editor-container">
+                        <div class="editor-body">
+                            <div id="sub-code1-highlight" class="highlight-layer"></div>
+                            <textarea id="sub-code1" class="code-textarea" spellcheck="false" placeholder="追加コード1..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="middle-box" id="box-sub2">
+                    <h3>追加実行2</h3>
+                    <div id="sub-code2-container" class="editor-container sub-editor-container">
+                        <div class="editor-body">
+                            <div id="sub-code2-highlight" class="highlight-layer"></div>
+                            <textarea id="sub-code2" class="code-textarea" spellcheck="false" placeholder="追加コード2..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="middle-box" id="box-sub3">
+                    <h3>追加実行3</h3>
+                    <div id="sub-code3-container" class="editor-container sub-editor-container">
+                        <div class="editor-body">
+                            <div id="sub-code3-highlight" class="highlight-layer"></div>
+                            <textarea id="sub-code3" class="code-textarea" spellcheck="false" placeholder="追加コード3..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="middle-box hidden" id="box-sub4">
+                    <h3>追加実行4</h3>
+                    <div id="sub-code4-container" class="editor-container sub-editor-container">
+                        <div class="editor-body">
+                            <div id="sub-code4-highlight" class="highlight-layer"></div>
+                            <textarea id="sub-code4" class="code-textarea" spellcheck="false" placeholder="追加コード4..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="middle-box hidden" id="box-sub5">
+                    <h3>追加実行5</h3>
+                    <div id="sub-code5-container" class="editor-container sub-editor-container">
+                        <div class="editor-body">
+                            <div id="sub-code5-highlight" class="highlight-layer"></div>
+                            <textarea id="sub-code5" class="code-textarea" spellcheck="false" placeholder="追加コード5..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="middle-box hidden" id="box-sub6">
+                    <h3>追加実行6</h3>
+                    <div id="sub-code6-container" class="editor-container sub-editor-container">
+                        <div class="editor-body">
+                            <div id="sub-code6-highlight" class="highlight-layer"></div>
+                            <textarea id="sub-code6" class="code-textarea" spellcheck="false" placeholder="追加コード6..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bottom-controls">
+                <div class="controls-column">
+                    <div class="sub-btn-group">
+                        <button class="sub-btn" onclick="runSub(1)">実行1</button>
+                        <button class="sub-btn" onclick="runSub(2)">実行2</button>
+                        <button class="sub-btn" onclick="runSub(3)">実行3</button>
+                        <button class="sub-btn" onclick="runSub(4)">実行4</button>
+                        <button class="sub-btn" onclick="runSub(5)">実行5</button>
+                        <button class="sub-btn" onclick="runSub(6)">実行6</button>
+                    </div>
+                    <div class="main-btn-group">
+                        <button onclick="runMain()">RUN</button>
+                        <button class="step-btn" onclick="stepMain()">ステップ</button>
+                        <button class="init-btn" onclick="resetEngine()">初期化</button>
+                    </div>
+                    <div class="checkbox-group">
+                        <span style="color: #888;">表示(最大3):</span>
+                        <label><input type="checkbox" id="chk-sub1" class="sub-chk" value="1" checked> 1</label>
+                        <label><input type="checkbox" id="chk-sub2" class="sub-chk" value="2" checked> 2</label>
+                        <label><input type="checkbox" id="chk-sub3" class="sub-chk" value="3" checked> 3</label>
+                        <label><input type="checkbox" id="chk-sub4" class="sub-chk" value="4"> 4</label>
+                        <label><input type="checkbox" id="chk-sub5" class="sub-chk" value="5"> 5</label>
+                        <label><input type="checkbox" id="chk-sub6" class="sub-chk" value="6"> 6</label>
+                    </div>
+                </div>
+                
+                <div class="input-wrapper">
+                    <div class="pane-header">
+                        <h3>Input</h3>
+                    </div>
+                    <textarea id="input-data" spellcheck="false" placeholder="入力データ..."></textarea>
+                </div>
+                
+                <div class="output-wrapper">
+                    <div class="pane-header output-header">
+                        <h3>Output</h3>
+                        <span id="exec-stats" class="stats">Line: - | Steps: 0</span>
+                    </div>
+                    <div id="output" class="output-area"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側：CASICメモリ可視化・操作パネル -->
+        <div class="right-pane">
+            <div class="memory-header">
+                <div class="memory-header-top">
+                    <div style="font-size: 12px; color: #bbb; font-weight: bold;">メモリ (変数・配列)</div>
+                    <button class="reset-scroll-btn" onclick="clearOutputOnly()">出力クリア</button>
+                </div>
+                <div class="memory-inputs">
+                    <input type="text" id="manual-mem-name" placeholder="名前 (例: a, b[])" title="変数名または配列名">
+                    <input type="text" id="manual-mem-val" placeholder="値 (例: 12, [a,b])" title="設定する値">
+                </div>
+                <button class="set-mem-btn" onclick="setManualMemory()">SET</button>
+            </div>
+            <div id="memory" class="memory-container">
+                <div class="memory-empty">メモリは空です</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 分割したJSファイルを順番に読み込む -->
+    <script src="casic-expr.js"></script>
+    <script src="casic-cmd.js"></script>
+    <script src="casic-ui.js"></script>
+</body>
+</html>
