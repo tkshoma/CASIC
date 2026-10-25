@@ -36,7 +36,7 @@ function isReservedSymbolChar(ch) {
     return symbols.indexOf(ch) !== -1;
 }
 
-// 通常の識別子先頭文字（数字・_・$ は不可）
+// 通常の識別子先頭文字（数字・_・$ は先頭不可）
 function isIdentStartChar(ch) {
     if (!ch) return false;
     if (isDigitChar(ch) || ch === '_' || ch === '$') return false;
@@ -50,14 +50,15 @@ function isVarStartChar(ch) {
     return isIdentStartChar(ch);
 }
 
-// 2文字目以降の文字（_ と $ は先頭以外では使用不可）
+// 2文字目以降の文字（改訂仕様：2文字目以降は記号として _ のみ使用可能、$ は不可）
 function isIdentPartChar(ch) {
     if (!ch) return false;
-    if (ch === '$' || ch === '_') return false;
+    if (ch === '$') return false;
+    if (ch === '_') return true;
     return !isReservedSymbolChar(ch);
 }
 
-// 関数名や引数名として有効な識別子か（先頭 _ は不可）
+// 関数名や通常の変数名として有効な識別子か（先頭 _ は不可、2文字目以降の _ は可）
 function isValidIdentifier(str) {
     if (!str || str.length === 0) return false;
     if (!isIdentStartChar(str[0])) return false;
@@ -67,13 +68,12 @@ function isValidIdentifier(str) {
     return true;
 }
 
-// 変数名として有効な識別子か（先頭のみ _ 可、かつ _ 単体は不可）
+// 変数名として有効な識別子か（関数内用の先頭 _ も可、ただし _ 単体は不可）
 function isValidVarIdentifier(str) {
     if (!str || str.length === 0) return false;
     if (str[0] === '_') {
         if (str.length < 2) return false;
-        if (!isIdentStartChar(str[1]) && !isDigitChar(str[1])) return false;
-        for (let i = 2; i < str.length; i++) {
+        for (let i = 1; i < str.length; i++) {
             if (!isIdentPartChar(str[i])) return false;
         }
         return true;
@@ -154,15 +154,15 @@ function xorBig(a, b) {
 }
 
 // ==========================================
-// 2. CASIC ランタイム状態（変数・配列・辞書・関数・コールスタック）
+// 2. CASIC ランタイム状態・同義語（エイリアス）定義
 // ==========================================
 const state = {
     vars: {},
     arrays: {},
     dicts: {},
-    functions: {},      // 小文字の関数名 -> ユーザー定義関数オブジェクト
-    callStack: [],      // 関数呼び出し中のローカルスコープスタック
-    funcOutputBuffer: '', // 式の評価中に呼ばれた関数内で発生した out / put 出力の一時バッファ
+    functions: {},
+    callStack: [],
+    funcOutputBuffer: '',
     forStates: {},
     inputPtr: 0,
     rngSeed: null,
@@ -173,29 +173,146 @@ const state = {
     warnings: []
 };
 
+// 命令の同義語（エイリアス）マップ
+const COMMAND_ALIASES = {
+    'fin': 'exit',
+    'inchar': 'charin',
+    'inall': 'allin',
+    'inreset': 'resetin',
+    'print': 'out',
+    's_sort': 'sort',
+    'l_sort': 'sort',
+    's_dsort': 'dsort',
+    'l_dsort': 'dsort',
+    's_rev': 'rev',
+    'l_rev': 'rev',
+    's_replace': 'replace',
+    'l_replace': 'replace',
+    'l_push': 'push',
+    'ins': 'push',
+    'add': 'push',
+    'l_del': 'del',
+    'l_clear': 'clear',
+    'l_uniq': 'uniq'
+};
+
+function normalizeCommandName(cmdLower) {
+    return Object.prototype.hasOwnProperty.call(COMMAND_ALIASES, cmdLower) ? COMMAND_ALIASES[cmdLower] : cmdLower;
+}
+
+// 関数の同義語（エイリアス）マップ
+const FUNCTION_ALIASES = {
+    'checkchar': 'charcheck',
+    'checkall': 'allcheck',
+    'c_abs': 'abs',
+    'c_not': 'not',
+    'c_sqrt': 'sqrt',
+    'c_round': 'round',
+    'c_floor': 'floor',
+    'celi': 'ceil',
+    'c_ceil': 'ceil',
+    'c_trunc': 'trunc',
+    'c_min': 'min',
+    'c_max': 'max',
+    'c_sum': 'sum',
+    'c_gcd': 'gcd',
+    'c_lcm': 'lcm',
+    'c_base': 'base',
+    'b_and': 'band',
+    'b_or': 'bor',
+    'b_xor': 'bxor',
+    'b_not': 'bnot',
+    'randh': 'hrand',
+    'randh.': 'hrand.',
+    'h_hash': 'hash',
+    'h_md5': 'md5',
+    'h_sha256': 'sha256',
+    's_len': 'len',
+    'l_len': 'len',
+    's_rev': 'rev',
+    'l_rev': 'rev',
+    's_sort': 'sort',
+    'l_sort': 'sort',
+    's_dsort': 'dsort',
+    'l_dsort': 'dsort',
+    's_find': 'find',
+    'l_find': 'find',
+    's_count': 'count',
+    'l_count': 'count',
+    's_replace': 'replace',
+    'l_replace': 'replace',
+    's_chr': 'chr',
+    's_ord': 'ord',
+    's_old': 'ord',
+    's_uni': 'uni',
+    's_split': 'split',
+    's_rep': 'rep',
+    's_trim': 'trim',
+    's_upper': 'upper',
+    's_lower': 'lower',
+    's_regex': 'regex',
+    's_if': 'if',
+    's_squeeze': 'squeeze',
+    's_at': 'at',
+    'l_at': 'at',
+    'd_at': 'at',
+    'l_join': 'join',
+    'l_grid': 'grid',
+    'l_flat': 'flat',
+    'l_bs': 'bs',
+    'l_uniq': 'uniq',
+    'd_has': 'has',
+    'key': 'keys',
+    'd_keys': 'keys',
+    'd_key': 'keys',
+    'd_json': 'json',
+    'd_g_shape': 'g_shape',
+    'd_g_image': 'g_image',
+    'd_g_text': 'g_text'
+};
+
+function normalizeFunctionName(funcNameLower) {
+    return Object.prototype.hasOwnProperty.call(FUNCTION_ALIASES, funcNameLower) ? FUNCTION_ALIASES[funcNameLower] : funcNameLower;
+}
+
 const COMMAND_KEYWORDS = new Set([
     'out', 'print', 'put',
-    'in', 'charin', 'allin', 'resetin',
+    'in', 'charin', 'inchar', 'allin', 'inall', 'resetin', 'inreset',
     'if', 'elseif', 'else', 'end', 'for', 'while', 'break',
     'go', 'to', 'fin', 'exit',
-    'sort', 'dsort', 'rev',
-    'push', 'ins', 'add', 'replace', 'del', 'clear', 'uniq',
-    'seed', 'rename', 'stop', 'return', 'fun'
+    'sort', 's_sort', 'l_sort',
+    'dsort', 's_dsort', 'l_dsort',
+    'rev', 's_rev', 'l_rev',
+    'replace', 's_replace', 'l_replace',
+    'push', 'l_push', 'ins', 'add',
+    'del', 'l_del',
+    'clear', 'l_clear',
+    'uniq', 'l_uniq',
+    'seed', 'rename', 'stop', 'return', 'fun', 'wait', 'js',
+    'g_size', 'g_smooth', 'g_clear', 'g_line', 'g_poly', 'g_rect', 'g_circle', 'g_image', 'g_text',
+    'cont', 'run', 'goto', 'step'
 ]);
 
-// 組み込み関数名の一覧（ユーザー定義関数との重複禁止チェック用）
+// 組み込み関数名の一覧（エイリアスを含むすべて）
 const BUILTIN_FUNCTION_NAMES = new Set([
-    'check', 'charcheck', 'allcheck',
-    'abs', 'not', 'sqrt', 'round', 'floor', 'ceil', 'trunc',
-    'min', 'max', 'sum', 'gcd', 'lcm', 'base',
-    'band', 'bor', 'bxor', 'bnot',
-    'rand', 'rand.', 'hrand', 'hrand.', 'hash', 'md5', 'sha256',
-    'big', 'num', 'str',
-    'chr', 'ord', 'uni',
-    'len', 'rev', 'sort', 'dsort', 'find', 'count', 'replace',
-    'split', 'rep', 'trim', 'upper', 'lower', 'regex', 'if',
-    'join', 'grid', 'flat', 'bs', 'uniq',
-    'has', 'keys', 'json'
+    'check', 'charcheck', 'checkchar', 'allcheck', 'checkall',
+    'abs', 'c_abs', 'not', 'c_not', 'sqrt', 'c_sqrt',
+    'round', 'c_round', 'floor', 'c_floor', 'ceil', 'celi', 'c_ceil', 'trunc', 'c_trunc',
+    'min', 'c_min', 'max', 'c_max', 'sum', 'c_sum', 'gcd', 'c_gcd', 'lcm', 'c_lcm', 'base', 'c_base',
+    'band', 'b_and', 'bor', 'b_or', 'bxor', 'b_xor', 'bnot', 'b_not',
+    'rand', 'rand.', 'hrand', 'randh', 'hrand.', 'randh.',
+    'hash', 'h_hash', 'md5', 'h_md5', 'sha256', 'h_sha256',
+    'big', 'num', 'str', 'eval',
+    'chr', 's_chr', 'ord', 's_ord', 's_old', 'uni', 's_uni',
+    'len', 's_len', 'l_len', 'rev', 's_rev', 'l_rev',
+    'sort', 's_sort', 'l_sort', 'dsort', 's_dsort', 'l_dsort',
+    'find', 's_find', 'l_find', 'count', 's_count', 'l_count', 'replace', 's_replace', 'l_replace',
+    'split', 's_split', 'rep', 's_rep', 'trim', 's_trim',
+    'upper', 's_upper', 'lower', 's_lower', 'regex', 's_regex', 'if', 's_if',
+    'squeeze', 's_squeeze', 'at', 's_at', 'l_at', 'd_at',
+    'join', 'l_join', 'grid', 'l_grid', 'flat', 'l_flat', 'bs', 'l_bs', 'uniq', 'l_uniq',
+    'has', 'd_has', 'keys', 'key', 'd_keys', 'd_key', 'json', 'd_json',
+    'g_shape', 'd_g_shape', 'g_image', 'd_g_image', 'g_text', 'd_g_text'
 ]);
 
 const ASSIGN_OPS = ['/.=', '+=', '-=', '&=', '*=', '/=', '%=', '='];
@@ -204,7 +321,6 @@ function getCurrentCallFrame() {
     return state.callStack.length > 0 ? state.callStack[state.callStack.length - 1] : null;
 }
 
-// 変数名が現在の関数フレームのローカル対象（先頭 `_` または引数名）か判定
 function resolveVarScope(rawName) {
     const key = cleanText(rawName).toLowerCase();
     const frame = getCurrentCallFrame();
@@ -705,6 +821,10 @@ function parseCasicArrayLiteralString(rawStr) {
         if (p.startsWith('[') && p.endsWith(']')) {
             return parseCasicArrayLiteralString(p);
         }
+        if (p.startsWith('{') && p.endsWith('}')) {
+            const dParsed = parseCasicJsonToDict(p);
+            if (dParsed.valid) return dParsed.dict;
+        }
         if (p.startsWith('$')) {
             const exprPart = cleanText(p.slice(1));
             if (exprPart === '') return "";
@@ -731,6 +851,21 @@ function coerceToArray(val) {
     return [String(val)];
 }
 
+function normalizeJsonValueRec(v) {
+    if (Array.isArray(v)) {
+        return v.map(normalizeJsonValueRec);
+    }
+    if (v !== null && typeof v === 'object') {
+        const out = {};
+        const keys = Object.keys(v);
+        for (let i = 0; i < keys.length; i++) {
+            out[String(keys[i])] = normalizeJsonValueRec(v[keys[i]]);
+        }
+        return out;
+    }
+    return String(v);
+}
+
 function parseCasicJsonToDict(rawVal) {
     if (isPlainDictObject(rawVal)) {
         return { dict: cloneDictDeep(rawVal), valid: true };
@@ -742,24 +877,32 @@ function parseCasicJsonToDict(rawVal) {
     try {
         const parsed = JSON.parse(s);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            const normalized = {};
-            const keys = Object.keys(parsed);
-            for (let i = 0; i < keys.length; i++) {
-                const k = String(keys[i]);
-                const v = parsed[k];
-                if (Array.isArray(v)) {
-                    normalized[k] = v.map(function(x) { return String(x); });
-                } else if (v !== null && typeof v === 'object') {
-                    normalized[k] = cloneDictDeep(v);
-                } else {
-                    normalized[k] = String(v);
-                }
-            }
-            return { dict: normalized, valid: true };
+            return { dict: normalizeJsonValueRec(parsed), valid: true };
         }
     } catch (e) {
     }
     return { dict: {}, valid: false };
+}
+
+// `at()` 関数用：文字列またはオブジェクトを配列または辞書構造として解釈する
+function parseNestedCasicStructure(val) {
+    if (Array.isArray(val) || isPlainDictObject(val)) {
+        return val;
+    }
+    const s = cleanText(val);
+    if (s.startsWith('{') && s.endsWith('}')) {
+        const dRes = parseCasicJsonToDict(s);
+        if (dRes.valid) return dRes.dict;
+    }
+    if (s.startsWith('[') && s.endsWith(']')) {
+        try {
+            const parsed = JSON.parse(s);
+            if (Array.isArray(parsed)) return normalizeJsonValueRec(parsed);
+        } catch (e) {
+        }
+        return parseCasicArrayLiteralString(s);
+    }
+    return val;
 }
 
 function parseCasicNumber(rawVal) {
@@ -1469,7 +1612,6 @@ function tokenizeExpression(exprStr) {
             continue;
         }
 
-        // 識別子（関数内ローカル変数 `_x` のため先頭 `_` もトークンとして切り出す）
         if (isVarStartChar(ch)) {
             let end = i + 1;
             while (end < len && isIdentPartChar(exprStr[end])) {
@@ -1485,7 +1627,7 @@ function tokenizeExpression(exprStr) {
             if (exprStr[end] === '.') {
                 let look = end + 1;
                 while (look < len && isSpaceChar(exprStr[look])) look++;
-                if (exprStr[look] === '(' && (lower === 'rand' || lower === 'hrand')) {
+                if (exprStr[look] === '(' && (lower === 'rand' || lower === 'hrand' || lower === 'randh')) {
                     word = word + '.';
                     lower = lower + '.';
                     end = end + 1;
@@ -1508,10 +1650,6 @@ function tokenizeExpression(exprStr) {
             continue;
         }
 
-        if (ch === '_') {
-            throw new Error('"_" は関数内の変数名の先頭にのみ使用できます');
-        }
-
         if (ch === '$') {
             throw new Error('変数名や式の途中に "$" は使用できません');
         }
@@ -1528,16 +1666,26 @@ function evalIndexToInt(nodeResult, defaultVal) {
     return Math.trunc(parsed.num);
 }
 
+// 文字列の範囲 s{...}（負の数が指定された場合は末尾から数えた番号を表す）
 function applyStringBraceSlice(targetStr, startRes, endRes, hasColon) {
     const chars = Array.from(toDisplayString(targetStr));
     const len = chars.length;
+    if (len === 0) return "";
+
     if (!hasColon) {
-        const idx = evalIndexToInt(startRes, 1);
+        let idx = evalIndexToInt(startRes, 1);
+        if (idx < 0) idx = len + 1 + idx;
         if (idx < 1 || idx > len) return "";
         return chars[idx - 1];
     }
-    const sIdx = startRes ? Math.max(1, evalIndexToInt(startRes, 1)) : 1;
-    const eIdx = endRes ? Math.min(len, evalIndexToInt(endRes, len)) : len;
+
+    let rawStart = startRes ? evalIndexToInt(startRes, 1) : 1;
+    let rawEnd = endRes ? evalIndexToInt(endRes, len) : len;
+    if (rawStart < 0) rawStart = len + 1 + rawStart;
+    if (rawEnd < 0) rawEnd = len + 1 + rawEnd;
+
+    const sIdx = Math.max(1, rawStart);
+    const eIdx = Math.min(len, rawEnd);
     if (sIdx > eIdx || sIdx > len || eIdx < 1) return "";
     return chars.slice(sIdx - 1, eIdx).join('');
 }
@@ -1593,11 +1741,89 @@ function resolveArgAsDict(argRes) {
     return parsed.valid ? parsed.dict : {};
 }
 
+// `squeeze` 関数ヘルパー
+function executeSqueezeFunction(args) {
+    if (args.length < 2) return args[0] ? toDisplayString(args[0]) : "";
+    const s1 = toDisplayString(args[0]);
+
+    // 引数が2つの場合: 連続するスペース・改行・タブをまとめて s3 に置き換える
+    if (args.length === 2) {
+        const s3 = toDisplayString(args[1]);
+        let out = '';
+        let inWs = false;
+        for (let i = 0; i < s1.length; i++) {
+            const ch = s1[i];
+            if (isSpaceChar(ch) || ch === '\n' || ch === '\r') {
+                if (!inWs) {
+                    out += s3;
+                    inWs = true;
+                }
+            } else {
+                out += ch;
+                inWs = false;
+            }
+        }
+        return out;
+    }
+
+    // 引数が3つの場合: 文字列 s1 の連続する文字列 s2 をまとめて s3 に置き換える
+    const s2 = toDisplayString(args[1]);
+    const s3 = toDisplayString(args[2]);
+    if (s2 === '') return s1;
+
+    let out = '';
+    let i = 0;
+    while (i < s1.length) {
+        if (s1.startsWith(s2, i)) {
+            out += s3;
+            while (i < s1.length && s1.startsWith(s2, i)) {
+                i += s2.length;
+            }
+        } else {
+            out += s1[i];
+            i++;
+        }
+    }
+    return out;
+}
+
+// `at(s1, s2, s3, ...)` 関数ヘルパー
+function executeAtFunction(argResults) {
+    if (argResults.length < 2) return "";
+    let current = resolveArgAsCollectionOrValue(argResults[0]);
+
+    for (let i = 1; i < argResults.length; i++) {
+        current = parseNestedCasicStructure(current);
+        const keyOrIdx = argResults[i].value;
+
+        if (Array.isArray(current)) {
+            const idx = Math.trunc(parseCasicNumber(keyOrIdx).num);
+            if (idx < 1 || idx > current.length) return "";
+            current = current[idx - 1];
+        } else if (isPlainDictObject(current)) {
+            const k = toDisplayString(keyOrIdx);
+            if (!Object.prototype.hasOwnProperty.call(current, k)) return "";
+            current = current[k];
+        } else {
+            return "";
+        }
+    }
+
+    if (Array.isArray(current)) {
+        return formatArrayAsCasicString(current);
+    }
+    if (isPlainDictObject(current)) {
+        return formatDictAsJsonString(current);
+    }
+    return String(current);
+}
+
 // ==========================================
 // 6. 組み込み関数 & ユーザー定義関数の呼び出しディスパッチ
 // ==========================================
 
-function callBuiltinFunction(funcNameLower, argResults) {
+function callBuiltinFunction(rawFuncNameLower, argResults) {
+    const funcNameLower = normalizeFunctionName(rawFuncNameLower);
     const args = argResults.map(function(r) { return r.value; });
 
     // --- 1. 入力の関数 (check, charcheck, allcheck) ---
@@ -1803,7 +2029,7 @@ function callBuiltinFunction(funcNameLower, argResults) {
         return computeSha256Hex(sKey);
     }
 
-    // --- 5. 型変換の関数 (big, num, str) ---
+    // --- 5. 型変換・評価の関数 (big, num, str, eval) ---
     if (funcNameLower === 'str') {
         return args.length > 0 ? toDisplayString(args[0]) : "";
     }
@@ -1817,8 +2043,13 @@ function callBuiltinFunction(funcNameLower, argResults) {
         const p = parseCasicNumber(args[0]);
         return p.kind === 'float' ? formatFloatStorage(p.num) : String(Math.trunc(p.num));
     }
+    if (funcNameLower === 'eval') {
+        if (args.length === 0) return "";
+        const codeExpr = toDisplayString(args[0]);
+        return evaluateExpression(codeExpr);
+    }
 
-    // --- 6. 文字コードの関数 (chr, ord, uni) ---
+    // --- 6 & 7. 文字列・配列共通 & 文字列の関数 ---
     if (funcNameLower === 'chr') {
         if (args.length === 0) return "";
         const code = Math.trunc(parseCasicNumber(args[0]).num);
@@ -1841,8 +2072,6 @@ function callBuiltinFunction(funcNameLower, argResults) {
         }
         return chars.map(function(c) { return String(c.codePointAt(0)); });
     }
-
-    // --- 7. 文字列・配列共通の関数 (len, rev, sort, dsort, find, count, replace) ---
     if (funcNameLower === 'len') {
         if (args.length === 0) return "0";
         const target = resolveArgAsCollectionOrValue(argResults[0]);
@@ -1923,8 +2152,6 @@ function callBuiltinFunction(funcNameLower, argResults) {
         }
         return toDisplayString(target).split(toDisplayString(s1)).join(toDisplayString(s2));
     }
-
-    // --- 8. 文字列の関数 (split, rep, trim, upper, lower, regex, if) ---
     if (funcNameLower === 'split') {
         if (args.length === 0) return [];
         const s1 = toDisplayString(args[0]);
@@ -1980,8 +2207,14 @@ function callBuiltinFunction(funcNameLower, argResults) {
         const s2 = args.length > 2 ? args[2] : "";
         return cond ? s1 : s2;
     }
+    if (funcNameLower === 'squeeze') {
+        return executeSqueezeFunction(args);
+    }
+    if (funcNameLower === 'at') {
+        return executeAtFunction(argResults);
+    }
 
-    // --- 9. 配列の関数 (join, grid, flat, bs, uniq) ---
+    // --- 8. 配列の関数 (join, grid, flat, bs, uniq) ---
     if (funcNameLower === 'join') {
         if (args.length === 0) return "";
         const target = resolveArgAsCollectionOrValue(argResults[0]);
@@ -2057,7 +2290,7 @@ function callBuiltinFunction(funcNameLower, argResults) {
         return String(lo + 1);
     }
 
-    // --- 10. 辞書・JSONの関数 (has, keys, json) ---
+    // --- 9. 辞書・JSONの関数 (has, keys, json, g_shape, g_image, g_text) ---
     if (funcNameLower === 'has') {
         if (args.length < 2) return "0";
         const dictObj = resolveArgAsDict(argResults[0]);
@@ -2074,15 +2307,37 @@ function callBuiltinFunction(funcNameLower, argResults) {
         const dictObj = resolveArgAsDict(argResults[0]);
         return formatDictAsJsonString(dictObj);
     }
+    if (funcNameLower === 'g_shape') {
+        return {
+            "x": "0", "y": "0", "w": "60", "h": "60",
+            "color": "#000000", "r": "0", "rot": "0",
+            "fill": "1", "frame": "5", "alpha": "1"
+        };
+    }
+    if (funcNameLower === 'g_image') {
+        return {
+            "x": "0", "y": "0", "w": "", "h": "",
+            "rot": "0", "cx": "", "cy": "",
+            "flipx": "0", "flipy": "0", "alpha": "1",
+            "clip": "", "hue": "0"
+        };
+    }
+    if (funcNameLower === 'g_text') {
+        return {
+            "x": "0", "y": "0", "w": "300", "h": "",
+            "rot": "0", "color": "#000000", "font": "",
+            "size": "30", "align": "left", "valign": "up", "alpha": "1"
+        };
+    }
 
-    // --- 11. ユーザー定義関数の呼び出し ---
-    if (Object.prototype.hasOwnProperty.call(state.functions, funcNameLower)) {
+    // --- 10. ユーザー定義関数の呼び出し ---
+    if (Object.prototype.hasOwnProperty.call(state.functions, rawFuncNameLower)) {
         if (typeof invokeUserDefinedFunction === 'function') {
-            return invokeUserDefinedFunction(state.functions[funcNameLower], argResults);
+            return invokeUserDefinedFunction(state.functions[rawFuncNameLower], argResults);
         }
     }
 
-    throw new Error('未定義または未実装の関数です: ' + funcNameLower + '()');
+    throw new Error('未定義または未実装の関数です: ' + rawFuncNameLower + '()');
 }
 
 function parseAndEvaluateTokens(tokens) {

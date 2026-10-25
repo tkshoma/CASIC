@@ -18,7 +18,16 @@ function splitCommandTargetArgs(str) {
     return splitTopLevelComma(s);
 }
 
-// `fun 関数名(引数1, 引数2, ...) [code]` のヘッダ解析
+// 命令名（先頭が英字で、2文字目以降は英字または `_`）を切り出すヘルパー
+function readCommandWordLength(str) {
+    if (!str || !isAsciiAlpha(str[0])) return 0;
+    let i = 1;
+    while (i < str.length && (isAsciiAlpha(str[i]) || str[i] === '_')) {
+        i++;
+    }
+    return i;
+}
+
 function parseFunHeader(restAfterFun) {
     const s = cleanText(restAfterFun);
     if (s === '' || !isIdentStartChar(s[0])) {
@@ -65,8 +74,7 @@ function classifyControlLine(rawLine) {
     const uncommented = cleanText(stripLineComment(rawLine));
     if (uncommented === '') return { kind: 'normal' };
 
-    let i = 0;
-    while (i < uncommented.length && isAsciiAlpha(uncommented[i])) i++;
+    const i = readCommandWordLength(uncommented);
     if (i === 0) return { kind: 'normal' };
 
     const kw = uncommented.slice(0, i).toLowerCase();
@@ -77,7 +85,6 @@ function classifyControlLine(rawLine) {
         return { kind: 'normal' };
     }
 
-    // ユーザー定義関数 `fun`
     if (kw === 'fun' && (rawAfterKw === '' || isSpaceChar(rawAfterKw[0]))) {
         const parsedFun = parseFunHeader(rest);
         if (parsedFun.error) {
@@ -258,7 +265,6 @@ function buildControlFlowStructure(lines, startLineOffset = 1, registerFunctions
         }
     }
 
-    // 複数行の fun ブロック本体を登録
     if (registerFunctions) {
         for (let i = 0; i < multiFunBlocks.length; i++) {
             const fb = multiFunBlocks[i];
@@ -333,7 +339,6 @@ function invokeUserDefinedFunction(funcDef, argResults) {
         forStates: {}
     };
 
-    // 引数をローカル変数としてセット（省略された引数は初期値 ""）
     for (let i = 0; i < funcDef.params.length; i++) {
         const pKey = funcDef.params[i];
         const argVal = (i < argResults.length) ? argResults[i].value : "";
@@ -345,7 +350,6 @@ function invokeUserDefinedFunction(funcDef, argResults) {
     state.forStates = frame.forStates;
 
     try {
-        // 1. 1行定義の関数 `fun f(x) code`
         if (funcDef.isSingleLine) {
             const res = executeInlineStatements(funcDef.inlineCode, funcDef.startLineOffset);
             if (res.output) {
@@ -360,7 +364,6 @@ function invokeUserDefinedFunction(funcDef, argResults) {
             return "";
         }
 
-        // 2. 複数行定義の関数
         const bodyLines = funcDef.bodyLines;
         const offset = funcDef.startLineOffset;
         const labelScan = buildLabelMap(bodyLines, offset);
@@ -914,20 +917,21 @@ function executePushInsAddCommand(cmdLower, restRaw) {
     setArray(arrName, arr);
 }
 
+// 4章: replace 命令（改訂仕様：変数に対する3引数置換にも対応）
 function executeReplaceCommand(restRaw) {
     const parsed = parseCommandOptionAndTarget(restRaw);
     const args = splitCommandTargetArgs(parsed.targetStr);
     if (args.length < 2) {
-        throw new Error('replace命令にはカンマ区切りで配列と置換値の指定が必要です (例: replace a[5], 5)');
+        throw new Error('replace命令にはカンマ区切りで対象と置換値の指定が必要です');
     }
 
     const targetSpec = parseArrayTargetSpec(args[0]);
-    const arrName = targetSpec.name;
-    const arr = cloneArrayDeep(getArray(arrName));
-
+    const targetName = targetSpec.name;
     const rawRangeStr = (parsed.optStr !== null && parsed.optStr !== '') ? parsed.optStr : targetSpec.bracketInside;
 
+    // 1. 対象引数が2つの場合: 配列aのn番目をsに置き換える
     if (args.length === 2) {
+        const arr = cloneArrayDeep(getArray(targetName));
         const rangeInfo = parseRangeOrIndexSpec(rawRangeStr, 1, arr.length);
         if (!rangeInfo.isSpecified || rangeInfo.n === null) {
             throw new Error('replace命令で対象引数が2つの場合は要素番号nの指定が必要です');
@@ -939,15 +943,31 @@ function executeReplaceCommand(restRaw) {
             arr.push("");
         }
         arr[nPos - 1] = Array.isArray(newVal) ? cloneArrayDeep(newVal) : String(newVal);
-        setArray(arrName, arr);
+        setArray(targetName, arr);
         return;
     }
 
+    // 2. 対象引数が3つの場合: 配列を含むか変数かを判定
+    const hasOptionRange = (rawRangeStr !== null && rawRangeStr !== undefined && cleanText(rawRangeStr) !== '');
+    const isArrayMode = targetSpec.hasExplicitBrackets || hasOptionRange ||
+        (hasArray(targetName) && !Object.prototype.hasOwnProperty.call(state.vars, targetName.toLowerCase()));
+
+    const s1 = evaluateExpression(args[1]);
+    const s2 = evaluateExpression(args[2]);
+
+    if (!isArrayMode) {
+        // 対象引数が3つで配列を含まない場合: 変数vの文字列s1を文字列s2に置き換えて再代入する
+        const currentStr = toDisplayString(getVar(targetName));
+        const replacedStr = currentStr.split(toDisplayString(s1)).join(toDisplayString(s2));
+        setVar(targetName, replacedStr);
+        return;
+    }
+
+    // 対象引数が3つで配列を含む場合: 配列aのn1~n2までの範囲内でs1に一致する要素をs2に置き換える
+    const arr = cloneArrayDeep(getArray(targetName));
     const rangeInfo = parseRangeOrIndexSpec(rawRangeStr, 1, arr.length);
     const n1 = Math.max(1, rangeInfo.isRange ? rangeInfo.n1 : (rangeInfo.isSpecified ? rangeInfo.n : 1));
     const n2 = Math.min(arr.length, rangeInfo.isRange ? rangeInfo.n2 : (rangeInfo.isSpecified ? rangeInfo.n : arr.length));
-    const s1 = evaluateExpression(args[1]);
-    const s2 = evaluateExpression(args[2]);
     const formattedS2 = Array.isArray(s2) ? cloneArrayDeep(s2) : String(s2);
 
     for (let idx = n1; idx <= n2; idx++) {
@@ -955,7 +975,7 @@ function executeReplaceCommand(restRaw) {
             arr[idx - 1] = formattedS2;
         }
     }
-    setArray(arrName, arr);
+    setArray(targetName, arr);
 }
 
 function executeDelCommand(restRaw) {
@@ -1408,8 +1428,7 @@ function buildLabelMap(lines, startLineOffset = 1) {
             const stmt = cleanText(stmts[stmtIdx]);
             if (stmt === '') continue;
 
-            let i = 0;
-            while (i < stmt.length && isAsciiAlpha(stmt[i])) i++;
+            const i = readCommandWordLength(stmt);
             if (i === 0) continue;
 
             const wordLower = stmt.slice(0, i).toLowerCase();
@@ -1466,12 +1485,8 @@ function executeStatement(stmtRaw, lineNum) {
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
 
-        let i = 0;
-        while (i < trimmed.length && isAsciiAlpha(trimmed[i])) {
-            i++;
-        }
-
-        if (i === 0) {
+        const cmdLen = readCommandWordLength(trimmed);
+        if (cmdLen === 0) {
             return {
                 output: flushFunctionOutput(''),
                 error: '[Line ' + lineNum + '] 解釈できない命令です: ' + trimmed,
@@ -1479,11 +1494,12 @@ function executeStatement(stmtRaw, lineNum) {
             };
         }
 
-        const cmdLower = trimmed.slice(0, i).toLowerCase();
-        const rest = trimmed.slice(i);
+        const rawCmdLower = trimmed.slice(0, cmdLen).toLowerCase();
+        const cmdLower = normalizeCommandName(rawCmdLower);
+        const rest = trimmed.slice(cmdLen);
         const restTrimmed = cleanText(rest);
 
-        // return 命令 (`return s`)
+        // return 命令
         if (cmdLower === 'return' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(' || rest[0] === '"' || rest[0] === '/' || rest[0] === '[' || rest[0] === '{')) {
             const retVal = restTrimmed === '' ? "" : evaluateExpression(restTrimmed);
             return {
@@ -1493,7 +1509,7 @@ function executeStatement(stmtRaw, lineNum) {
             };
         }
 
-        // 1行 fun 命令（実行行が当たった場合は登録してスキップ）
+        // 1行 fun 命令
         if (cmdLower === 'fun' && (rest === '' || isSpaceChar(rest[0]))) {
             const parsedFun = parseFunHeader(restTrimmed);
             if (parsedFun.error) {
@@ -1627,7 +1643,7 @@ function executeStatement(stmtRaw, lineNum) {
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
 
-        if (cmdLower === 'out' || cmdLower === 'print' || cmdLower === 'put') {
+        if (cmdLower === 'out' || cmdLower === 'put') {
             const outStr = executeOutputCommand(cmdLower, rest);
             return { output: flushFunctionOutput(outStr), error: null, action: null };
         }
@@ -1637,8 +1653,8 @@ function executeStatement(stmtRaw, lineNum) {
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
 
-        if (cmdLower === 'push' || cmdLower === 'ins' || cmdLower === 'add') {
-            executePushInsAddCommand(cmdLower, rest);
+        if (cmdLower === 'push') {
+            executePushInsAddCommand(rawCmdLower, rest);
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
 
@@ -1687,19 +1703,18 @@ function executeStatement(stmtRaw, lineNum) {
             };
         }
 
-        if (cmdLower === 'fin' || cmdLower === 'exit') {
+        if (cmdLower === 'exit') {
             if (restTrimmed !== '') {
                 return {
                     output: '',
-                    error: '[Line ' + lineNum + '] ' + cmdLower + '命令に引数は指定できません',
+                    error: '[Line ' + lineNum + '] ' + rawCmdLower + '命令に引数は指定できません',
                     action: null
                 };
             }
             return { output: '', error: null, action: { type: 'fin' } };
         }
 
-        // もし登録済みのユーザー定義関数が `f(5)` のように単独文として呼ばれた場合も評価可能にする
-        if ( restTrimmed.startsWith('(') && Object.prototype.hasOwnProperty.call(state.functions, cmdLower) ) {
+        if (restTrimmed.startsWith('(') && Object.prototype.hasOwnProperty.call(state.functions, rawCmdLower)) {
             evaluateExpression(trimmed);
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
@@ -1786,7 +1801,6 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
     let errors = [];
 
     try {
-        // 0. 1行 fun または 複数行 fun に通常の実行行が当たった場合はスキップする
         if (info.kind === 'fun_single') {
             state.totalSteps++;
             return {
