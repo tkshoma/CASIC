@@ -36,21 +36,18 @@ function isReservedSymbolChar(ch) {
     return symbols.indexOf(ch) !== -1;
 }
 
-// 通常の識別子先頭文字（数字・_・$ は先頭不可）
 function isIdentStartChar(ch) {
     if (!ch) return false;
     if (isDigitChar(ch) || ch === '_' || ch === '$') return false;
     return !isReservedSymbolChar(ch);
 }
 
-// 変数名先頭文字（関数内ローカル変数用の先頭 _ も構文上許可し、実行時にスコープ検証する）
 function isVarStartChar(ch) {
     if (!ch) return false;
     if (ch === '_') return true;
     return isIdentStartChar(ch);
 }
 
-// 2文字目以降の文字（改訂仕様：2文字目以降は記号として _ のみ使用可能、$ は不可）
 function isIdentPartChar(ch) {
     if (!ch) return false;
     if (ch === '$') return false;
@@ -58,7 +55,6 @@ function isIdentPartChar(ch) {
     return !isReservedSymbolChar(ch);
 }
 
-// 関数名や通常の変数名として有効な識別子か（先頭 _ は不可、2文字目以降の _ は可）
 function isValidIdentifier(str) {
     if (!str || str.length === 0) return false;
     if (!isIdentStartChar(str[0])) return false;
@@ -68,7 +64,6 @@ function isValidIdentifier(str) {
     return true;
 }
 
-// 変数名として有効な識別子か（関数内用の先頭 _ も可、ただし _ 単体は不可）
 function isValidVarIdentifier(str) {
     if (!str || str.length === 0) return false;
     if (str[0] === '_') {
@@ -167,13 +162,14 @@ const state = {
     inputPtr: 0,
     rngSeed: null,
     stepEvaluateBranch: false,
+    isStopped: false,
+    runEndLineIdx: null,
     lastModified: null,
     pc: 0,
     totalSteps: 0,
     warnings: []
 };
 
-// 命令の同義語（エイリアス）マップ
 const COMMAND_ALIASES = {
     'fin': 'exit',
     'inchar': 'charin',
@@ -200,7 +196,6 @@ function normalizeCommandName(cmdLower) {
     return Object.prototype.hasOwnProperty.call(COMMAND_ALIASES, cmdLower) ? COMMAND_ALIASES[cmdLower] : cmdLower;
 }
 
-// 関数の同義語（エイリアス）マップ
 const FUNCTION_ALIASES = {
     'checkchar': 'charcheck',
     'checkall': 'allcheck',
@@ -293,7 +288,6 @@ const COMMAND_KEYWORDS = new Set([
     'cont', 'run', 'goto', 'step'
 ]);
 
-// 組み込み関数名の一覧（エイリアスを含むすべて）
 const BUILTIN_FUNCTION_NAMES = new Set([
     'check', 'charcheck', 'checkchar', 'allcheck', 'checkall',
     'abs', 'c_abs', 'not', 'c_not', 'sqrt', 'c_sqrt',
@@ -884,7 +878,6 @@ function parseCasicJsonToDict(rawVal) {
     return { dict: {}, valid: false };
 }
 
-// `at()` 関数用：文字列またはオブジェクトを配列または辞書構造として解釈する
 function parseNestedCasicStructure(val) {
     if (Array.isArray(val) || isPlainDictObject(val)) {
         return val;
@@ -1266,6 +1259,18 @@ function stripLineComment(line) {
     return line;
 }
 
+// `run n1:n2` の範囲指定コロン `:` かどうかを判定するヘルパー
+function isRunCommandAwaitingRangeColon(currentStr) {
+    const trimmed = cleanText(currentStr);
+    if (!trimmed) return false;
+    if (trimmed.length >= 3 && trimmed.slice(0, 3).toLowerCase() === 'run') {
+        if (trimmed.length === 3 || isSpaceChar(trimmed[3])) {
+            return trimmed.indexOf(':') === -1;
+        }
+    }
+    return false;
+}
+
 function splitStatementsByColon(line) {
     const uncommented = stripLineComment(line);
     const statements = [];
@@ -1291,6 +1296,11 @@ function splitStatementsByColon(line) {
             else if (ch === '}') braceDepth = Math.max(0, braceDepth - 1);
 
             if (ch === ':' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+                // `run 2:3` や `run 3:` の範囲コロンであれば命令を分割せずそのまま繋げる
+                if (isRunCommandAwaitingRangeColon(current)) {
+                    current += ch;
+                    continue;
+                }
                 if (cleanText(current) !== '') {
                     statements.push(cleanText(current));
                 }
@@ -1666,7 +1676,6 @@ function evalIndexToInt(nodeResult, defaultVal) {
     return Math.trunc(parsed.num);
 }
 
-// 文字列の範囲 s{...}（負の数が指定された場合は末尾から数えた番号を表す）
 function applyStringBraceSlice(targetStr, startRes, endRes, hasColon) {
     const chars = Array.from(toDisplayString(targetStr));
     const len = chars.length;
@@ -1741,12 +1750,10 @@ function resolveArgAsDict(argRes) {
     return parsed.valid ? parsed.dict : {};
 }
 
-// `squeeze` 関数ヘルパー
 function executeSqueezeFunction(args) {
     if (args.length < 2) return args[0] ? toDisplayString(args[0]) : "";
     const s1 = toDisplayString(args[0]);
 
-    // 引数が2つの場合: 連続するスペース・改行・タブをまとめて s3 に置き換える
     if (args.length === 2) {
         const s3 = toDisplayString(args[1]);
         let out = '';
@@ -1766,7 +1773,6 @@ function executeSqueezeFunction(args) {
         return out;
     }
 
-    // 引数が3つの場合: 文字列 s1 の連続する文字列 s2 をまとめて s3 に置き換える
     const s2 = toDisplayString(args[1]);
     const s3 = toDisplayString(args[2]);
     if (s2 === '') return s1;
@@ -1787,7 +1793,6 @@ function executeSqueezeFunction(args) {
     return out;
 }
 
-// `at(s1, s2, s3, ...)` 関数ヘルパー
 function executeAtFunction(argResults) {
     if (argResults.length < 2) return "";
     let current = resolveArgAsCollectionOrValue(argResults[0]);
@@ -1826,7 +1831,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
     const funcNameLower = normalizeFunctionName(rawFuncNameLower);
     const args = argResults.map(function(r) { return r.value; });
 
-    // --- 1. 入力の関数 (check, charcheck, allcheck) ---
     if (funcNameLower === 'check') {
         if (args.length === 0) {
             return readNextInputToken(null, false).token;
@@ -1842,7 +1846,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         return readRemainingInput();
     }
 
-    // --- 2. 計算の関数 (abs, not, sqrt, round, floor, ceil, trunc, min, max, sum, gcd, lcm, base) ---
     if (funcNameLower === 'abs') {
         if (args.length === 0) return "0";
         const p = parseCasicNumber(args[0]);
@@ -1930,7 +1933,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         throw new Error('base関数には2つまたは3つの引数が必要です');
     }
 
-    // --- 3. ビット演算の関数 (band, bor, bxor, bnot) ---
     if (funcNameLower === 'band' || funcNameLower === 'bor' || funcNameLower === 'bxor') {
         if (args.length < 2) throw new Error(funcNameLower + '関数には2つの引数が必要です');
         const p1 = parseCasicNumber(args[0]);
@@ -1949,7 +1951,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         return p.rank === 2 ? (res.toString() + 'n') : res.toString();
     }
 
-    // --- 4. ハッシュ・乱数の関数 (rand, rand., hrand, hrand., hash, md5, sha256) ---
     if (funcNameLower === 'rand') {
         const r = nextRandomFloat01();
         if (args.length === 0) {
@@ -2029,7 +2030,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         return computeSha256Hex(sKey);
     }
 
-    // --- 5. 型変換・評価の関数 (big, num, str, eval) ---
     if (funcNameLower === 'str') {
         return args.length > 0 ? toDisplayString(args[0]) : "";
     }
@@ -2049,7 +2049,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         return evaluateExpression(codeExpr);
     }
 
-    // --- 6 & 7. 文字列・配列共通 & 文字列の関数 ---
     if (funcNameLower === 'chr') {
         if (args.length === 0) return "";
         const code = Math.trunc(parseCasicNumber(args[0]).num);
@@ -2214,7 +2213,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         return executeAtFunction(argResults);
     }
 
-    // --- 8. 配列の関数 (join, grid, flat, bs, uniq) ---
     if (funcNameLower === 'join') {
         if (args.length === 0) return "";
         const target = resolveArgAsCollectionOrValue(argResults[0]);
@@ -2290,7 +2288,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         return String(lo + 1);
     }
 
-    // --- 9. 辞書・JSONの関数 (has, keys, json, g_shape, g_image, g_text) ---
     if (funcNameLower === 'has') {
         if (args.length < 2) return "0";
         const dictObj = resolveArgAsDict(argResults[0]);
@@ -2330,7 +2327,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         };
     }
 
-    // --- 10. ユーザー定義関数の呼び出し ---
     if (Object.prototype.hasOwnProperty.call(state.functions, rawFuncNameLower)) {
         if (typeof invokeUserDefinedFunction === 'function') {
             return invokeUserDefinedFunction(state.functions[rawFuncNameLower], argResults);

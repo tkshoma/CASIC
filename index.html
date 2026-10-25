@@ -7,9 +7,9 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <!-- 左側 -->
-        <div class="left-pane">
+    <div class="workspace">
+        <!-- 左カラム：Code（縦いっぱい） -->
+        <div class="code-column">
             <div class="pane-header">
                 <h3>Code <span style="font-size:12px; font-weight:normal; color:#888;">(行番号クリックでその行だけ実行)</span></h3>
                 <span id="code-stats" class="stats">Lines: 0 | Length: 0 | Pos: 0</span>
@@ -21,10 +21,34 @@
                     <textarea id="code" class="code-textarea" spellcheck="false" placeholder="ここにCASICのコードを書く..."></textarea>
                 </div>
             </div>
-            
-            <div class="middle-controls">
-                <div class="middle-box" id="box-sub1">
-                    <h3>追加実行1</h3>
+        </div>
+
+        <!-- 中央カラム：1.コマンドライン / 2.実行1・実行2 / 3.入力・出力 / 4.ボタン群 -->
+        <div class="center-column">
+            <!-- 1段目：コマンドライン -->
+            <div class="cmdline-section">
+                <div class="pane-header">
+                    <h3>コマンドライン</h3>
+                    <div class="header-actions">
+                        <span id="exec-stats" class="stats">Next: 1 | InPtr: 0 | Steps: 0</span>
+                        <button class="small-tool-btn" onclick="clearCmdlineLog()" title="ログをクリア">クリア</button>
+                        <button class="small-tool-btn" onclick="openPopupWindow('cmdline')" title="コマンドラインを別ウィンドウで開く">別窓</button>
+                    </div>
+                </div>
+                <div id="cmdline-log" class="cmdline-log"></div>
+                <div class="cmdline-input-row">
+                    <textarea id="cmdline-input" class="cmdline-input" spellcheck="false" placeholder="cont, run 2:3, goto 2, step 2... (Ctrl+Enterで実行)"></textarea>
+                    <button class="cmdline-run-btn" onclick="runCommandLineFromMain()">実行</button>
+                </div>
+            </div>
+
+            <!-- 2段目：実行1 ＆ 実行2 -->
+            <div class="sub-editors-row">
+                <div class="sub-box" id="box-sub1">
+                    <div class="pane-header">
+                        <h3>実行1</h3>
+                        <button class="small-tool-btn run-mini-btn" onclick="runSub(1)">▶ 実行</button>
+                    </div>
                     <div id="sub-code1-container" class="editor-container sub-editor-container">
                         <div class="editor-body">
                             <div id="sub-code1-highlight" class="highlight-layer"></div>
@@ -32,8 +56,11 @@
                         </div>
                     </div>
                 </div>
-                <div class="middle-box" id="box-sub2">
-                    <h3>追加実行2</h3>
+                <div class="sub-box" id="box-sub2">
+                    <div class="pane-header">
+                        <h3>実行2</h3>
+                        <button class="small-tool-btn run-mini-btn" onclick="runSub(2)">▶ 実行</button>
+                    </div>
                     <div id="sub-code2-container" class="editor-container sub-editor-container">
                         <div class="editor-body">
                             <div id="sub-code2-highlight" class="highlight-layer"></div>
@@ -41,72 +68,95 @@
                         </div>
                     </div>
                 </div>
-                <div class="middle-box" id="box-sub3">
-                    <h3>追加実行3</h3>
-                    <div id="sub-code3-container" class="editor-container sub-editor-container">
-                        <div class="editor-body">
-                            <div id="sub-code3-highlight" class="highlight-layer"></div>
-                            <textarea id="sub-code3" class="code-textarea" spellcheck="false" placeholder="追加コード3..."></textarea>
-                        </div>
-                    </div>
-                </div>
             </div>
-            
-            <div class="bottom-controls">
-                <div class="controls-column">
-                    <div class="sub-btn-group">
-                        <button class="sub-btn" onclick="runSub(1)">実行1</button>
-                        <button class="sub-btn" onclick="runSub(2)">実行2</button>
-                        <button class="sub-btn" onclick="runSub(3)">実行3</button>
-                    </div>
-                    <div class="main-btn-group">
-                        <button onclick="runMain()">RUN</button>
-                        <button class="step-btn" onclick="stepMain()">ステップ</button>
-                        <button class="init-btn" onclick="resetEngine()">初期化</button>
-                    </div>
-                </div>
-                
-                <div class="input-wrapper">
+
+            <!-- 3段目：入力 ＆ 出力 -->
+            <div class="io-row">
+                <div class="io-box">
                     <div class="pane-header">
-                        <h3>Input</h3>
+                        <h3>入力</h3>
                         <div class="header-actions">
-                            <button class="small-tool-btn" onclick="openPopupWindow('input')" title="Inputを別ウィンドウで開く">別窓</button>
+                            <button class="small-tool-btn" onclick="openPopupWindow('input')" title="入力を別ウィンドウで開く">別窓</button>
                         </div>
                     </div>
                     <textarea id="input-data" spellcheck="false" placeholder="入力データ..."></textarea>
                 </div>
-                
-                <div class="output-wrapper">
-                    <div class="pane-header output-header">
-                        <h3>Output</h3>
+                <div class="io-box">
+                    <div class="pane-header">
+                        <h3>出力</h3>
                         <div class="header-actions">
-                            <span id="exec-stats" class="stats">Line: - | InPtr: 0 | Steps: 0</span>
                             <button class="small-tool-btn" onclick="clearOutputOnly()" title="出力をクリア">クリア</button>
-                            <button class="small-tool-btn" onclick="openPopupWindow('output')" title="Outputを別ウィンドウで開く">別窓</button>
+                            <button class="small-tool-btn" onclick="openPopupWindow('output')" title="出力を別ウィンドウで開く">別窓</button>
                         </div>
                     </div>
                     <div id="output" class="output-area"></div>
                 </div>
             </div>
+
+            <!-- 4段目：ボタン群（縦幅を広げた2段構成） -->
+            <div class="button-cluster">
+                <div class="button-cluster-row">
+                    <button onclick="runMain()">RUN</button>
+                    <button class="step-btn" onclick="stepMain()">ステップ</button>
+                    <button class="init-btn" onclick="resetEngine()">初期化</button>
+                </div>
+                <div class="button-cluster-row">
+                    <button class="sub-btn" onclick="runSub(1)">実行1</button>
+                    <button class="sub-btn" onclick="runSub(2)">実行2</button>
+                    <button class="settings-btn" onclick="openSettingsModal()">設定</button>
+                </div>
+            </div>
         </div>
 
-        <!-- 右側：CASICメモリ可視化・操作パネル -->
-        <div class="right-pane">
+        <!-- 右カラム：メモリ（縦いっぱい） -->
+        <div class="memory-column">
             <div class="memory-header">
                 <div class="memory-header-top">
-                    <div style="font-size: 12px; color: #bbb; font-weight: bold;">メモリ (変数・配列)</div>
+                    <div style="font-size: 14px; color: #bbb; font-weight: bold;">メモリ</div>
                     <div class="header-actions">
                         <button class="small-tool-btn" onclick="openPopupWindow('memory')" title="メモリを別ウィンドウで開く">別窓</button>
                     </div>
                 </div>
                 <div class="memory-inputs">
-                    <input type="text" id="manual-mem-name" placeholder="名前 (例: a, b[])" title="変数名または配列名">
-                    <input type="text" id="manual-mem-val" placeholder="値 (例: 12, [a,b])" title="設定する値">
+                    <input type="text" id="manual-mem-name" placeholder="名前 (a, b[])" title="変数名または配列名">
+                    <input type="text" id="manual-mem-val" placeholder="値 (12, [a,b])" title="設定する値">
+                    <button class="set-mem-btn" onclick="setManualMemory()">SET</button>
                 </div>
-                <button class="set-mem-btn" onclick="setManualMemory()">SET</button>
             </div>
             <div id="memory" class="memory-container">
                 <div class="memory-empty">メモリは空です</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 設定モーダル（タブ内オーバーレイ表示） -->
+    <div id="settings-modal" class="modal-overlay hidden" onclick="handleModalOverlayClick(event)">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>エディタ設定</h3>
+                <button class="modal-close-btn" onclick="closeSettingsModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <label for="setting-tab-spaces">Tabキーのインデントスペース数</label>
+                    <input type="number" id="setting-tab-spaces" min="1" max="16" value="4">
+                </div>
+                <div class="setting-item">
+                    <label for="setting-auto-indent">改行時の自動インデント</label>
+                    <input type="checkbox" id="setting-auto-indent" checked>
+                </div>
+                <div class="setting-item">
+                    <label for="setting-auto-paren">「(」入力時の自動閉じ括弧「)」</label>
+                    <input type="checkbox" id="setting-auto-paren" checked>
+                </div>
+                <div class="setting-item">
+                    <label for="setting-auto-quote">「"」入力時の自動閉じクォート「"」</label>
+                    <input type="checkbox" id="setting-auto-quote" checked>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="setting-save-note">※設定は自動的にブラウザへ保存されます</span>
+                <button class="modal-ok-btn" onclick="closeSettingsModal()">閉じる</button>
             </div>
         </div>
     </div>

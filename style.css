@@ -2,14 +2,110 @@
     --vscode-font: Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
-body { font-family: sans-serif; margin: 0; padding: 20px; background-color: #1e1e1e; color: #d4d4d4; height: 100vh; box-sizing: border-box; overflow: hidden; }
-.container { display: flex; width: 100%; height: 100%; gap: 20px; min-height: 0; }
-.left-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.right-pane { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; background: #252526; padding: 15px 10px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); min-height: 0; height: 100%; box-sizing: border-box; }
+body {
+    font-family: sans-serif;
+    margin: 0;
+    padding: 14px;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    height: 100vh;
+    box-sizing: border-box;
+    overflow: hidden;
+}
 
-.editor-container { position: relative; background-color: #1e1e1e; border: 1px solid #444; border-radius: 4px; display: flex; flex-direction: row; overflow: hidden; min-height: 0; }
-.editor-container:focus-within { border-color: #007acc; }
-#code-container { flex: 4; margin-bottom: 10px; min-height: 0; }
+.hidden {
+    display: none !important;
+}
+
+.workspace {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    gap: 14px;
+    min-height: 0;
+}
+
+/* 1. 左カラム：Code（縦いっぱい） */
+.code-column {
+    flex: 1.3;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+}
+
+/* 2. 中央カラム：コマンドライン / 実行1・2 / 入力・出力 / ボタン群 */
+.center-column {
+    flex: 1.15;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+}
+
+/* 3. 右カラム：メモリ（縦いっぱい） */
+.memory-column {
+    width: 250px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: #252526;
+    padding: 12px 10px;
+    border-radius: 6px;
+    border: 1px solid #3c3c3c;
+    min-height: 0;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.pane-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+}
+.pane-header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: #bbb;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.stats {
+    font-size: 11px;
+    color: #888;
+    font-family: var(--vscode-font);
+    white-space: nowrap;
+}
+
+/* エディタ共通 */
+.editor-container {
+    position: relative;
+    background-color: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    min-height: 0;
+}
+.editor-container:focus-within {
+    border-color: #007acc;
+}
+
+#code-container {
+    flex: 1;
+    min-height: 0;
+}
 
 .line-numbers {
     width: 44px;
@@ -49,50 +145,244 @@ body { font-family: sans-serif; margin: 0; padding: 20px; background-color: #1e1
 }
 
 .highlight-layer, .code-textarea {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    padding: 15px; box-sizing: border-box;
-    font-family: var(--vscode-font); font-size: 18px; line-height: 1.5;
-    margin: 0; border: none; overflow-y: auto; overflow-x: auto;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    padding: 15px;
+    box-sizing: border-box;
+    font-family: var(--vscode-font);
+    font-size: 18px;
+    line-height: 1.5;
+    margin: 0;
+    border: none;
+    overflow-y: auto;
+    overflow-x: auto;
     white-space: pre;
 }
-.highlight-layer { color: #d4d4d4; pointer-events: none; }
-.code-textarea { background: transparent; color: transparent; caret-color: #d4d4d4; resize: none; outline: none; }
+.highlight-layer {
+    color: #d4d4d4;
+    pointer-events: none;
+}
+.code-textarea {
+    background: transparent;
+    color: transparent;
+    caret-color: #d4d4d4;
+    resize: none;
+    outline: none;
+}
 
-.sub-editor-container { flex: 1; min-height: 0; }
-.sub-editor-container .highlight-layer, 
-.sub-editor-container .code-textarea { font-size: 16px; padding: 10px 12px; white-space: pre; }
-
-.middle-controls { display: flex; gap: 10px; flex: 1.5; margin-bottom: 12px; min-height: 0; }
-.middle-box { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-
-.bottom-controls { display: flex; gap: 10px; flex-shrink: 0; height: 170px; max-height: 170px; min-height: 0; }
-.controls-column { flex: 1.1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-
-.sub-btn-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; flex: 1; min-height: 0; }
-.main-btn-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; flex: 1; min-height: 0; }
-
-button { font-size: 15px; font-weight: bold; cursor: pointer; background-color: #007acc; color: white; border: none; border-radius: 4px; transition: background-color 0.2s; margin: 0; width: 100%; height: 100%; }
-button:hover { background-color: #005f9e; }
-
-button.sub-btn { background-color: #0f8f62; font-size: 14px; padding: 0; white-space: nowrap; }
-button.sub-btn:hover { background-color: #0b6b49; }
-
-button.init-btn { background-color: #b33939; }
-button.init-btn:hover { background-color: #8b2c2c; }
-button.step-btn { background-color: #d48844; }
-button.step-btn:hover { background-color: #b36e32; }
-
-.header-actions {
+/* 中央1段目：コマンドライン */
+.cmdline-section {
+    flex: 1.1;
+    min-height: 0;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    background: #252526;
+    padding: 8px 10px;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+.cmdline-log {
+    flex: 1;
+    min-height: 0;
+    background-color: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+    font-family: var(--vscode-font);
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.cmdline-input-row {
+    display: flex;
     gap: 6px;
+    height: 46px;
+    flex-shrink: 0;
+}
+.cmdline-input {
+    flex: 1;
+    resize: none;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: var(--vscode-font);
+    font-size: 13px;
+    line-height: 1.35;
+    outline: none;
+}
+.cmdline-input:focus {
+    border-color: #007acc;
+}
+button.cmdline-run-btn {
+    width: 60px;
+    height: 100%;
+    font-size: 13px;
+    background-color: #007acc;
+    flex-shrink: 0;
+}
+button.cmdline-run-btn:hover {
+    background-color: #005f9e;
+}
+
+/* 中央2段目：実行1 ＆ 実行2 */
+.sub-editors-row {
+    flex: 0.95;
+    display: flex;
+    gap: 10px;
+    min-height: 0;
+}
+.sub-box {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+.sub-editor-container {
+    flex: 1;
+    min-height: 0;
+}
+.sub-editor-container .highlight-layer,
+.sub-editor-container .code-textarea {
+    font-size: 15px;
+    padding: 8px 10px;
+    white-space: pre;
+}
+
+/* 中央3段目：入力 ＆ 出力 */
+.io-row {
+    flex: 0.95;
+    display: flex;
+    gap: 10px;
+    min-height: 0;
+}
+.io-box {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+#input-data {
+    flex: 1;
+    resize: none;
+    padding: 8px 10px;
+    font-family: var(--vscode-font);
+    font-size: 13px;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    line-height: 1.45;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+#input-data:focus {
+    outline: none;
+    border-color: #007acc;
+}
+
+.output-area {
+    font-family: var(--vscode-font);
+    flex: 1;
+    min-height: 0;
+    background: #1e1e1e;
+    padding: 8px 10px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    overflow-y: auto;
+    word-break: break-all;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+/* 中央4段目：ボタン群（縦幅を106pxに拡大し2段構成） */
+.button-cluster {
+    flex: 0 0 106px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #252526;
+    padding: 10px;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+.button-cluster-row {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    min-height: 0;
+}
+
+button {
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    background-color: #007acc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+}
+button:hover {
+    background-color: #005f9e;
+}
+
+button.sub-btn {
+    background-color: #0f8f62;
+    font-size: 15px;
+}
+button.sub-btn:hover {
+    background-color: #0b6b49;
+}
+
+button.init-btn {
+    background-color: #b33939;
+}
+button.init-btn:hover {
+    background-color: #8b2c2c;
+}
+
+button.step-btn {
+    background-color: #d48844;
+}
+button.step-btn:hover {
+    background-color: #b36e32;
+}
+
+button.settings-btn {
+    background-color: #4a5568;
+}
+button.settings-btn:hover {
+    background-color: #384152;
 }
 
 button.small-tool-btn {
     flex: none;
     font-size: 11px;
     font-weight: normal;
-    padding: 2px 7px;
+    padding: 2px 8px;
     background-color: #3c3c3c;
     color: #d4d4d4;
     border: 1px solid #555;
@@ -107,31 +397,29 @@ button.small-tool-btn:hover {
     border-color: #007acc;
     color: #ffffff;
 }
+button.run-mini-btn {
+    background-color: #0f8f62;
+    border-color: #0f8f62;
+    color: #fff;
+    font-weight: bold;
+}
+button.run-mini-btn:hover {
+    background-color: #0b6b49;
+}
 
-.input-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.output-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-
-#input-data { flex: 1; resize: none; padding: 10px 15px; font-family: var(--vscode-font); font-size: 14px; background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; line-height: 1.5; box-sizing: border-box; width: 100%; margin: 0; min-height: 0; overflow-y: auto; }
-#input-data:focus { outline: none; border-color: #007acc; }
-
-.pane-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-shrink: 0; }
-.pane-header h3 { margin: 0; font-size: 15px; color: #bbb; }
-h3 { margin-top: 0; margin-bottom: 6px; font-size: 15px; color: #bbb; flex-shrink: 0; }
-.output-header h3 { font-size: 14px; }
-
-.stats { font-size: 11px; color: #888; font-family: var(--vscode-font); white-space: nowrap; }
-.output-area { font-family: var(--vscode-font); flex: 1; min-height: 0; background: #1e1e1e; padding: 10px 15px; border: 1px solid #444; border-radius: 4px; font-size: 15px; line-height: 1.4; white-space: pre-wrap; overflow-y: auto; word-break: break-all; margin: 0; box-sizing: border-box; }
 .error-text { color: #ff6b6b; }
 .warn-text { color: #dcdcaa; }
+.info-text { color: #4fc1ff; }
+.cmd-echo-text { color: #888; }
 
-/* メモリ操作UI */
-.memory-header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; flex-shrink: 0; }
+/* メモリカラム内部 */
+.memory-header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; flex-shrink: 0; }
 .memory-header-top { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
-.memory-inputs { display: flex; gap: 5px; }
-.memory-inputs input { flex: 1; width: 0; background: #333; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; font-family: var(--vscode-font); font-size: 12px; padding: 4px; }
+.memory-inputs { display: flex; gap: 4px; align-items: center; }
+.memory-inputs input { flex: 1; width: 0; background: #333; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; font-family: var(--vscode-font); font-size: 11px; padding: 4px; }
 .memory-inputs input:focus { outline: none; border-color: #007acc; }
 
-button.set-mem-btn { background-color: #d48844; font-size: 12px; height: 26px; padding: 2px 0; border-radius: 3px; }
+button.set-mem-btn { width: 42px; flex-shrink: 0; background-color: #d48844; font-size: 11px; height: 24px; padding: 0; border-radius: 3px; }
 button.set-mem-btn:hover { background-color: #b36e32; }
 
 .memory-container { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 2px; }
@@ -165,13 +453,8 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     text-align: right;
     scrollbar-width: thin;
 }
-.cell-value::-webkit-scrollbar {
-    height: 4px;
-}
-.cell-value::-webkit-scrollbar-thumb {
-    background-color: #666;
-    border-radius: 2px;
-}
+.cell-value::-webkit-scrollbar { height: 4px; }
+.cell-value::-webkit-scrollbar-thumb { background-color: #666; border-radius: 2px; }
 
 .memory-array-box {
     width: 100%;
@@ -201,16 +484,9 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     border-bottom: 1px solid #4a4a4a;
     flex-shrink: 0;
 }
-.memory-array-box.active .memory-array-header {
-    background-color: #094771;
-}
-.array-len-badge {
-    font-size: 10px;
-    color: #aaa;
-}
-.memory-array-box.active .array-len-badge {
-    color: #cce4f7;
-}
+.memory-array-box.active .memory-array-header { background-color: #094771; }
+.array-len-badge { font-size: 10px; color: #aaa; }
+.memory-array-box.active .array-len-badge { color: #cce4f7; }
 .memory-array-list {
     flex: 1;
     min-height: 0;
@@ -232,11 +508,7 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     flex-shrink: 0;
     overflow: hidden;
 }
-.array-item-idx {
-    color: #888;
-    font-size: 11px;
-    flex-shrink: 0;
-}
+.array-item-idx { color: #888; font-size: 11px; flex-shrink: 0; }
 .array-item-val {
     color: #ce9178;
     white-space: nowrap;
@@ -247,11 +519,113 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     text-align: right;
     scrollbar-width: thin;
 }
-.array-item-val::-webkit-scrollbar {
-    height: 4px;
-}
-.array-item-val::-webkit-scrollbar-thumb {
-    background-color: #666;
-    border-radius: 2px;
-}
+.array-item-val::-webkit-scrollbar { height: 4px; }
+.array-item-val::-webkit-scrollbar-thumb { background-color: #666; border-radius: 2px; }
 .memory-empty { color: #666; font-size: 12px; text-align: center; margin-top: 20px; font-family: var(--vscode-font); }
+
+/* 設定モーダル */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.modal-box {
+    width: 440px;
+    max-width: 92vw;
+    background-color: #252526;
+    border: 1px solid #555;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: #2d2d2d;
+    border-bottom: 1px solid #444;
+}
+.modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #e0e0e0;
+}
+button.modal-close-btn {
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    color: #aaa;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0;
+}
+button.modal-close-btn:hover {
+    background-color: #444;
+    color: #fff;
+}
+.modal-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.setting-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    color: #d4d4d4;
+}
+.setting-item label {
+    cursor: pointer;
+    user-select: none;
+}
+.setting-item input[type="number"] {
+    width: 64px;
+    padding: 5px 8px;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-family: var(--vscode-font);
+    font-size: 14px;
+    text-align: center;
+}
+.setting-item input[type="number"]:focus {
+    outline: none;
+    border-color: #007acc;
+}
+.setting-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #007acc;
+    cursor: pointer;
+}
+.modal-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background-color: #2d2d2d;
+    border-top: 1px solid #444;
+}
+.setting-save-note {
+    font-size: 11px;
+    color: #888;
+}
+button.modal-ok-btn {
+    width: 84px;
+    height: 32px;
+    font-size: 13px;
+    background-color: #007acc;
+}

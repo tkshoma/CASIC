@@ -18,7 +18,6 @@ function splitCommandTargetArgs(str) {
     return splitTopLevelComma(s);
 }
 
-// 命令名（先頭が英字で、2文字目以降は英字または `_`）を切り出すヘルパー
 function readCommandWordLength(str) {
     if (!str || !isAsciiAlpha(str[0])) return 0;
     let i = 1;
@@ -393,7 +392,7 @@ function invokeUserDefinedFunction(funcDef, argResults) {
             if (Object.prototype.hasOwnProperty.call(stepRes, 'returnValue')) {
                 return stepRes.returnValue;
             }
-            if (stepRes.halted) {
+            if (stepRes.halted || stepRes.stopped) {
                 break;
             }
 
@@ -917,7 +916,6 @@ function executePushInsAddCommand(cmdLower, restRaw) {
     setArray(arrName, arr);
 }
 
-// 4章: replace 命令（改訂仕様：変数に対する3引数置換にも対応）
 function executeReplaceCommand(restRaw) {
     const parsed = parseCommandOptionAndTarget(restRaw);
     const args = splitCommandTargetArgs(parsed.targetStr);
@@ -929,7 +927,6 @@ function executeReplaceCommand(restRaw) {
     const targetName = targetSpec.name;
     const rawRangeStr = (parsed.optStr !== null && parsed.optStr !== '') ? parsed.optStr : targetSpec.bracketInside;
 
-    // 1. 対象引数が2つの場合: 配列aのn番目をsに置き換える
     if (args.length === 2) {
         const arr = cloneArrayDeep(getArray(targetName));
         const rangeInfo = parseRangeOrIndexSpec(rawRangeStr, 1, arr.length);
@@ -947,7 +944,6 @@ function executeReplaceCommand(restRaw) {
         return;
     }
 
-    // 2. 対象引数が3つの場合: 配列を含むか変数かを判定
     const hasOptionRange = (rawRangeStr !== null && rawRangeStr !== undefined && cleanText(rawRangeStr) !== '');
     const isArrayMode = targetSpec.hasExplicitBrackets || hasOptionRange ||
         (hasArray(targetName) && !Object.prototype.hasOwnProperty.call(state.vars, targetName.toLowerCase()));
@@ -956,14 +952,12 @@ function executeReplaceCommand(restRaw) {
     const s2 = evaluateExpression(args[2]);
 
     if (!isArrayMode) {
-        // 対象引数が3つで配列を含まない場合: 変数vの文字列s1を文字列s2に置き換えて再代入する
         const currentStr = toDisplayString(getVar(targetName));
         const replacedStr = currentStr.split(toDisplayString(s1)).join(toDisplayString(s2));
         setVar(targetName, replacedStr);
         return;
     }
 
-    // 対象引数が3つで配列を含む場合: 配列aのn1~n2までの範囲内でs1に一致する要素をs2に置き換える
     const arr = cloneArrayDeep(getArray(targetName));
     const rangeInfo = parseRangeOrIndexSpec(rawRangeStr, 1, arr.length);
     const n1 = Math.max(1, rangeInfo.isRange ? rangeInfo.n1 : (rangeInfo.isSpecified ? rangeInfo.n : 1));
@@ -1121,6 +1115,15 @@ function executeSeedCommand(restRaw) {
     const val = evaluateExpression(trimmed);
     const parsed = parseCasicNumber(val);
     state.rngSeed = Math.trunc(parsed.num) | 0;
+}
+
+// 7章: js s 命令（文字列sをJavaScriptのコードとして実行する）
+function executeJsCommand(restRaw) {
+    const trimmed = cleanText(restRaw);
+    if (trimmed === '') return;
+    const jsCode = toDisplayString(evaluateExpression(trimmed));
+    const fn = new Function(jsCode);
+    fn();
 }
 
 // ==========================================
@@ -1299,6 +1302,173 @@ function executeResetinCommand(restRaw) {
         throw new Error('resetin命令に引数は指定できません');
     }
     state.inputPtr = 0;
+}
+
+// ==========================================
+// 2.8 コマンドライン専用命令（cont, run n1:n2, goto n, step n）
+// ==========================================
+
+function getMainCodeLinesArray() {
+    const el = document.getElementById('code');
+    if (!el) return [''];
+    return String(el.value).split('\r\n').join('\n').split('\n');
+}
+
+// メインCode欄を現在の state.pc（または指定範囲）から maxSteps ステップ分実行する
+function runMainCodeSession(options) {
+    const opts = options || {};
+    const lines = getMainCodeLinesArray();
+    let totalOutput = '';
+    let allErrors = [];
+
+    const labelScan = buildLabelMap(lines, 1);
+    const cfStructure = buildControlFlowStructure(lines, 1, true);
+    allErrors = allErrors.concat(labelScan.errors, cfStructure.errors);
+    const labelMap = labelScan.labels;
+
+    if (typeof opts.startLineIdx === 'number') {
+        state.pc = Math.max(0, opts.startLineIdx);
+        state.stepEvaluateBranch = false;
+        state.isStopped = false;
+    }
+
+    const endLineIdx = (typeof opts.endLineIdx === 'number')
+        ? opts.endLineIdx
+        : (typeof state.runEndLineIdx === 'number' ? state.runEndLineIdx : (lines.length - 1));
+    state.runEndLineIdx = endLineIdx;
+
+    const maxSteps = (typeof opts.maxSteps === 'number') ? opts.maxSteps : 100000;
+    let stepsExecuted = 0;
+
+    while (state.pc >= 0 && state.pc <= endLineIdx && state.pc < lines.length && stepsExecuted < maxSteps) {
+        stepsExecuted++;
+        const currentIdx = state.pc;
+        const stepRes = executeLineWithControlFlow(currentIdx, lines, 1, labelMap, cfStructure, state.stepEvaluateBranch);
+
+        totalOutput += stepRes.output;
+        if (stepRes.errors && stepRes.errors.length > 0) {
+            allErrors = allErrors.concat(stepRes.errors);
+        }
+
+        state.pc = stepRes.nextLineIdx;
+        state.stepEvaluateBranch = stepRes.nextEvalBranch;
+
+        if (stepRes.stopped) {
+            state.isStopped = true;
+            state.warnings.push('[Line ' + (currentIdx + 1) + '] stop命令により一時停止しました (続行するには cont を実行)');
+            break;
+        }
+
+        if (stepRes.halted) {
+            state.isStopped = false;
+            state.pc = 0;
+            state.stepEvaluateBranch = false;
+            break;
+        }
+    }
+
+    if (stepsExecuted >= 100000 && maxSteps >= 100000 && state.pc <= endLineIdx && state.pc < lines.length && !state.isStopped) {
+        allErrors.push('[Line ' + (state.pc + 1) + '] 実行ステップ数が上限(100000回)を超えたため停止しました（無限ループの可能性があります）');
+    }
+
+    return { output: totalOutput, errors: allErrors };
+}
+
+function executeCmdlineGoto(restTrimmed) {
+    const lines = getMainCodeLinesArray();
+    let n = 1;
+    if (restTrimmed !== '') {
+        const val = evaluateExpression(restTrimmed);
+        n = Math.trunc(parseCasicNumber(val).num);
+    }
+    if (n < 1) n = 1;
+    state.pc = Math.min(Math.max(0, n - 1), Math.max(0, lines.length - 1));
+    state.stepEvaluateBranch = false;
+    state.isStopped = false;
+    state.runEndLineIdx = lines.length - 1;
+    return { output: '', error: null, action: null };
+}
+
+function executeCmdlineStep(restTrimmed) {
+    const lines = getMainCodeLinesArray();
+    let n = 1;
+    if (restTrimmed !== '') {
+        const val = evaluateExpression(restTrimmed);
+        n = Math.max(0, Math.trunc(parseCasicNumber(val).num));
+    }
+    if (n === 0) return { output: '', error: null, action: null };
+    if (state.pc < 0 || state.pc >= lines.length) {
+        state.pc = 0;
+        state.stepEvaluateBranch = false;
+    }
+    const res = runMainCodeSession({
+        endLineIdx: lines.length - 1,
+        maxSteps: n
+    });
+    return {
+        output: res.output,
+        error: res.errors.length > 0 ? res.errors.join('\n') : null,
+        action: null
+    };
+}
+
+function executeCmdlineCont(restTrimmed) {
+    if (restTrimmed !== '') {
+        return { output: '', error: 'cont命令に引数は指定できません', action: null };
+    }
+    const lines = getMainCodeLinesArray();
+    if (state.pc < 0 || state.pc >= lines.length) {
+        return { output: '', error: null, action: null };
+    }
+    state.isStopped = false;
+    const endIdx = (typeof state.runEndLineIdx === 'number') ? state.runEndLineIdx : (lines.length - 1);
+    const res = runMainCodeSession({
+        endLineIdx: endIdx,
+        maxSteps: 100000
+    });
+    return {
+        output: res.output,
+        error: res.errors.length > 0 ? res.errors.join('\n') : null,
+        action: null
+    };
+}
+
+function executeCmdlineRun(restTrimmed) {
+    const lines = getMainCodeLinesArray();
+    let n1 = 1;
+    let n2 = lines.length;
+
+    if (restTrimmed !== '') {
+        if (restTrimmed.indexOf(':') !== -1) {
+            const parts = restTrimmed.split(':');
+            if (cleanText(parts[0]) !== '') {
+                n1 = Math.trunc(parseCasicNumber(evaluateExpression(parts[0])).num);
+            }
+            if (cleanText(parts[1]) !== '') {
+                n2 = Math.trunc(parseCasicNumber(evaluateExpression(parts[1])).num);
+            }
+        } else {
+            n1 = Math.trunc(parseCasicNumber(evaluateExpression(restTrimmed)).num);
+            n2 = n1;
+        }
+    }
+
+    n1 = Math.max(1, n1);
+    n2 = Math.min(lines.length, n2);
+    if (n1 > n2 || n1 > lines.length) {
+        return { output: '', error: null, action: null };
+    }
+
+    const res = runMainCodeSession({
+        startLineIdx: n1 - 1,
+        endLineIdx: n2 - 1,
+        maxSteps: 100000
+    });
+    return {
+        output: res.output,
+        error: res.errors.length > 0 ? res.errors.join('\n') : null,
+        action: null
+    };
 }
 
 // ==========================================
@@ -1498,6 +1668,43 @@ function executeStatement(stmtRaw, lineNum) {
         const cmdLower = normalizeCommandName(rawCmdLower);
         const rest = trimmed.slice(cmdLen);
         const restTrimmed = cleanText(rest);
+
+        // コマンドライン専用命令 (cont, run, goto, step)
+        if (cmdLower === 'cont' && (rest === '' || isSpaceChar(rest[0]))) {
+            return executeCmdlineCont(restTrimmed);
+        }
+        if (cmdLower === 'run' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === ':')) {
+            return executeCmdlineRun(restTrimmed);
+        }
+        if (cmdLower === 'goto' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(')) {
+            return executeCmdlineGoto(restTrimmed);
+        }
+        if (cmdLower === 'step' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(')) {
+            return executeCmdlineStep(restTrimmed);
+        }
+
+        // stop 命令
+        if (cmdLower === 'stop' && restTrimmed === '') {
+            return {
+                output: flushFunctionOutput(''),
+                error: null,
+                action: { type: 'stop' }
+            };
+        }
+
+        // js 命令
+        if (cmdLower === 'js' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '"' || rest[0] === '/' || rest[0] === '(')) {
+            executeJsCommand(rest);
+            return { output: flushFunctionOutput(''), error: null, action: null };
+        }
+
+        // wait 命令 (同期エンジン内では警告を出さず指定ミリ秒の認識のみ行う)
+        if (cmdLower === 'wait' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(')) {
+            if (restTrimmed !== '') {
+                evaluateExpression(restTrimmed);
+            }
+            return { output: flushFunctionOutput(''), error: null, action: null };
+        }
 
         // return 命令
         if (cmdLower === 'return' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(' || rest[0] === '"' || rest[0] === '/' || rest[0] === '[' || rest[0] === '{')) {
@@ -1808,7 +2015,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                 errors: errors,
                 nextLineIdx: lineIdx + 1,
                 nextEvalBranch: false,
-                halted: false
+                halted: false,
+                stopped: false
             };
         }
         if (info.kind === 'fun_multi') {
@@ -1818,7 +2026,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                 errors: errors,
                 nextLineIdx: info.block.endLine + 1,
                 nextEvalBranch: false,
-                halted: false
+                halted: false,
+                stopped: false
             };
         }
 
@@ -1836,14 +2045,15 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                 errors: errors,
                 nextLineIdx: branchDecision.nextLineIdx,
                 nextEvalBranch: branchDecision.evaluateBranchOnNext,
-                halted: false
+                halted: false,
+                stopped: false
             };
         }
 
         if (info.kind === 'elseif' || info.kind === 'else') {
             state.totalSteps++;
             if (!info.block) {
-                return { output: '', errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false };
+                return { output: '', errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false, stopped: false };
             }
             if (!evaluateBranchFlag) {
                 return {
@@ -1851,7 +2061,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                     errors: errors,
                     nextLineIdx: info.block.endLine + 1,
                     nextEvalBranch: false,
-                    halted: false
+                    halted: false,
+                    stopped: false
                 };
             }
             const branchDecision = evaluateIfBranchAt(info.block, info.branchIndex, lineNum);
@@ -1866,7 +2077,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                 errors: errors,
                 nextLineIdx: branchDecision.nextLineIdx,
                 nextEvalBranch: branchDecision.evaluateBranchOnNext,
-                halted: false
+                halted: false,
+                stopped: false
             };
         }
 
@@ -1881,7 +2093,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                     errors: errors,
                     nextLineIdx: info.block.endLine + 1,
                     nextEvalBranch: false,
-                    halted: false
+                    halted: false,
+                    stopped: false
                 };
             }
             state.forStates[lineIdx] = {
@@ -1897,7 +2110,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                 errors: errors,
                 nextLineIdx: lineIdx + 1,
                 nextEvalBranch: false,
-                halted: false
+                halted: false,
+                stopped: false
             };
         }
 
@@ -1911,7 +2125,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                     errors: errors,
                     nextLineIdx: info.block.endLine + 1,
                     nextEvalBranch: false,
-                    halted: false
+                    halted: false,
+                    stopped: false
                 };
             }
             return {
@@ -1919,7 +2134,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                 errors: errors,
                 nextLineIdx: lineIdx + 1,
                 nextEvalBranch: false,
-                halted: false
+                halted: false,
+                stopped: false
             };
         }
 
@@ -1927,10 +2143,10 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
             state.totalSteps++;
             const blk = info.block;
             if (!blk) {
-                return { output: '', errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false };
+                return { output: '', errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false, stopped: false };
             }
             if (blk.type === 'if' || blk.type === 'fun') {
-                return { output: '', errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false };
+                return { output: '', errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false, stopped: false };
             }
             if (blk.type === 'for') {
                 const fState = state.forStates[blk.startLine];
@@ -1944,7 +2160,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                         errors: errors,
                         nextLineIdx: blk.startLine + 1,
                         nextEvalBranch: false,
-                        halted: false
+                        halted: false,
+                        stopped: false
                     };
                 } else {
                     delete state.forStates[blk.startLine];
@@ -1953,7 +2170,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                         errors: errors,
                         nextLineIdx: lineIdx + 1,
                         nextEvalBranch: false,
-                        halted: false
+                        halted: false,
+                        stopped: false
                     };
                 }
             }
@@ -1963,7 +2181,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
                     errors: errors,
                     nextLineIdx: blk.startLine,
                     nextEvalBranch: false,
-                    halted: false
+                    halted: false,
+                    stopped: false
                 };
             }
         }
@@ -1984,7 +2203,8 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
             errors: errors,
             nextLineIdx: lineIdx + 1,
             nextEvalBranch: false,
-            halted: false
+            halted: false,
+            stopped: false
         };
     } catch (e) {
         errors.push('[Line ' + lineNum + '] 実行エラー: ' + e.message);
@@ -1993,12 +2213,23 @@ function executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, c
             errors: errors,
             nextLineIdx: lineIdx + 1,
             nextEvalBranch: false,
-            halted: false
+            halted: false,
+            stopped: false
         };
     }
 }
 
 function handleActionTransition(action, lineIdx, lineNum, lineOutput, errors, labelMap, cfStructure, totalLines) {
+    if (action.type === 'stop') {
+        return {
+            output: lineOutput,
+            errors: errors,
+            nextLineIdx: lineIdx + 1,
+            nextEvalBranch: false,
+            halted: false,
+            stopped: true
+        };
+    }
     if (action.type === 'return') {
         return {
             output: lineOutput,
@@ -2006,37 +2237,57 @@ function handleActionTransition(action, lineIdx, lineNum, lineOutput, errors, la
             nextLineIdx: totalLines,
             nextEvalBranch: false,
             halted: true,
+            stopped: false,
             returnValue: action.value
         };
     }
     if (action.type === 'fin') {
-        return { output: lineOutput, errors: errors, nextLineIdx: totalLines, nextEvalBranch: false, halted: true };
+        return { output: lineOutput, errors: errors, nextLineIdx: totalLines, nextEvalBranch: false, halted: true, stopped: false };
     }
     if (action.type === 'break') {
         const targetLine = resolveBreakTargetLine(lineIdx, action.count, cfStructure, totalLines);
-        return { output: lineOutput, errors: errors, nextLineIdx: targetLine, nextEvalBranch: false, halted: false };
+        return { output: lineOutput, errors: errors, nextLineIdx: targetLine, nextEvalBranch: false, halted: false, stopped: false };
     }
     if (action.type === 'go') {
         const dest = labelMap && labelMap[action.targetLabel];
         if (!dest) {
             errors.push('[Line ' + lineNum + '] 移動先の "to ' + action.targetLabel + '" が見つかりません');
-            return { output: lineOutput, errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false };
+            return { output: lineOutput, errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false, stopped: false };
         }
-        return { output: lineOutput, errors: errors, nextLineIdx: dest.lineIdx, nextEvalBranch: false, halted: false };
+        return { output: lineOutput, errors: errors, nextLineIdx: dest.lineIdx, nextEvalBranch: false, halted: false, stopped: false };
     }
-    return { output: lineOutput, errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false };
+    return { output: lineOutput, errors: errors, nextLineIdx: lineIdx + 1, nextEvalBranch: false, halted: false, stopped: false };
 }
 
-function executeCasicCode(rawCode, startLineOffset = 1) {
+// 追加実行1〜3 または コマンドラインのコードを実行する（メインCode欄の forStates や pc と干渉しないよう分離）
+function executeCasicCode(rawCode, startLineOffset = 1, isSubOrCmd = false) {
     const normalized = String(rawCode).split('\r\n').join('\n');
     const lines = normalized.split('\n');
-    let totalOutput = '';
-    state.warnings = [];
 
+    if (!isSubOrCmd) {
+        state.warnings = [];
+        const mainRes = runMainCodeSession({
+            startLineIdx: 0,
+            endLineIdx: lines.length - 1,
+            maxSteps: 100000
+        });
+        return {
+            output: mainRes.output,
+            errors: mainRes.errors,
+            warnings: state.warnings.slice()
+        };
+    }
+
+    state.warnings = [];
+    let totalOutput = '';
     const labelScan = buildLabelMap(lines, startLineOffset);
     const cfStructure = buildControlFlowStructure(lines, startLineOffset, true);
     let allErrors = labelScan.errors.concat(cfStructure.errors);
     const labelMap = labelScan.labels;
+
+    // サブ実行・コマンドライン用の独立した forStates を用意し、内部で goto/step を呼ぶ瞬間だけメインの forStates に切り替える
+    const localForStates = {};
+    const mainForStates = state.forStates;
 
     const MAX_LINE_TRANSITIONS = 100000;
     let transitions = 0;
@@ -2051,16 +2302,28 @@ function executeCasicCode(rawCode, startLineOffset = 1) {
             break;
         }
 
-        const stepRes = executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, cfStructure, evalBranchFlag);
+        const info = cfStructure.lineInfos[lineIdx] || { kind: 'normal' };
+        let stepRes = null;
+
+        if (info.kind === 'for_multi' || info.kind === 'end') {
+            state.forStates = localForStates;
+            stepRes = executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, cfStructure, evalBranchFlag);
+            state.forStates = mainForStates;
+        } else {
+            state.forStates = mainForStates;
+            stepRes = executeLineWithControlFlow(lineIdx, lines, startLineOffset, labelMap, cfStructure, evalBranchFlag);
+        }
+
         totalOutput += stepRes.output;
         if (stepRes.errors.length > 0) {
             allErrors = allErrors.concat(stepRes.errors);
         }
-        if (stepRes.halted) break;
+        if (stepRes.halted || stepRes.stopped) break;
 
         lineIdx = stepRes.nextLineIdx;
         evalBranchFlag = stepRes.nextEvalBranch;
     }
 
+    state.forStates = mainForStates;
     return { output: totalOutput, errors: allErrors, warnings: state.warnings.slice() };
 }

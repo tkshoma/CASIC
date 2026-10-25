@@ -10,18 +10,129 @@ const bracketColors = [
     '#ffffff'  // 8重: 真っ白
 ];
 
-// 別ウィンドウ（ポップアップ）管理オブジェクト
 const popupWindows = {
     input: null,
     output: null,
-    memory: null
+    memory: null,
+    cmdline: null
 };
 
 const popupFontSizes = {
     input: 18,
     output: 18,
-    memory: 15
+    memory: 15,
+    cmdline: 15
 };
+
+// ==========================================
+// エディタ設定 & localStorage 保存・復元
+// ==========================================
+const SETTINGS_STORAGE_KEY = 'casic_editor_settings_v1';
+
+const editorSettings = {
+    tabSpaces: 4,
+    autoIndent: true,
+    autoCloseParen: true,
+    autoCloseQuote: true
+};
+
+function loadEditorSettings() {
+    try {
+        const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+            if (typeof parsed.tabSpaces === 'number' && parsed.tabSpaces >= 1 && parsed.tabSpaces <= 16) {
+                editorSettings.tabSpaces = Math.trunc(parsed.tabSpaces);
+            }
+            if (typeof parsed.autoIndent === 'boolean') {
+                editorSettings.autoIndent = parsed.autoIndent;
+            }
+            if (typeof parsed.autoCloseParen === 'boolean') {
+                editorSettings.autoCloseParen = parsed.autoCloseParen;
+            }
+            if (typeof parsed.autoCloseQuote === 'boolean') {
+                editorSettings.autoCloseQuote = parsed.autoCloseQuote;
+            }
+        }
+    } catch (e) {
+        // localStorage が使えない環境でもエラーで止めない
+    }
+}
+
+function saveEditorSettings() {
+    try {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(editorSettings));
+    } catch (e) {
+    }
+}
+
+function syncSettingsModalInputs() {
+    const tabInput = document.getElementById('setting-tab-spaces');
+    const indentChk = document.getElementById('setting-auto-indent');
+    const parenChk = document.getElementById('setting-auto-paren');
+    const quoteChk = document.getElementById('setting-auto-quote');
+
+    if (tabInput) tabInput.value = String(editorSettings.tabSpaces);
+    if (indentChk) indentChk.checked = editorSettings.autoIndent;
+    if (parenChk) parenChk.checked = editorSettings.autoCloseParen;
+    if (quoteChk) quoteChk.checked = editorSettings.autoCloseQuote;
+}
+
+function initSettingsModalEvents() {
+    const tabInput = document.getElementById('setting-tab-spaces');
+    const indentChk = document.getElementById('setting-auto-indent');
+    const parenChk = document.getElementById('setting-auto-paren');
+    const quoteChk = document.getElementById('setting-auto-quote');
+
+    if (tabInput) {
+        tabInput.addEventListener('change', function() {
+            const val = Math.max(1, Math.min(16, Math.trunc(Number(tabInput.value) || 4)));
+            editorSettings.tabSpaces = val;
+            tabInput.value = String(val);
+            saveEditorSettings();
+        });
+    }
+    if (indentChk) {
+        indentChk.addEventListener('change', function() {
+            editorSettings.autoIndent = indentChk.checked;
+            saveEditorSettings();
+        });
+    }
+    if (parenChk) {
+        parenChk.addEventListener('change', function() {
+            editorSettings.autoCloseParen = parenChk.checked;
+            saveEditorSettings();
+        });
+    }
+    if (quoteChk) {
+        quoteChk.addEventListener('change', function() {
+            editorSettings.autoCloseQuote = quoteChk.checked;
+            saveEditorSettings();
+        });
+    }
+}
+
+function openSettingsModal() {
+    syncSettingsModalInputs();
+    const modal = document.getElementById('settings-modal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function handleModalOverlayClick(e) {
+    if (e.target && e.target.id === 'settings-modal') {
+        closeSettingsModal();
+    }
+}
+
+// ==========================================
+// シンタックスハイライト・エディタ制御
+// ==========================================
 
 function escapeHtml(str) {
     return String(str)
@@ -305,14 +416,74 @@ function setupEditor(id, isMain = false) {
     });
 
     textarea.addEventListener('keydown', function(e) {
+        // IME変換中のキー操作は邪魔しない
+        if (e.isComposing) return;
+
+        // 1. Tabキーによるスペース挿入
         if (e.key === 'Tab') {
+            e.preventDefault();
+            const spacesCount = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
+            const indentSpaces = ' '.repeat(spacesCount);
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            const val = this.value;
+            this.value = val.substring(0, start) + indentSpaces + val.substring(end);
+            this.selectionStart = this.selectionEnd = start + indentSpaces.length;
+            update();
+            return;
+        }
+
+        // 2. Enterキーによる自動インデント
+        if (e.key === 'Enter' && editorSettings.autoIndent) {
             e.preventDefault();
             const start = this.selectionStart;
             const end = this.selectionEnd;
             const val = this.value;
-            this.value = val.substring(0, start) + '    ' + val.substring(end);
-            this.selectionStart = this.selectionEnd = start + 4;
+
+            const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+            let currentIndent = '';
+            for (let i = lineStart; i < start; i++) {
+                const ch = val[i];
+                if (ch === ' ' || ch === '\t' || ch === CHAR_FW_SP) {
+                    currentIndent += ch;
+                } else {
+                    break;
+                }
+            }
+
+            const insertText = '\n' + currentIndent;
+            this.value = val.substring(0, start) + insertText + val.substring(end);
+            this.selectionStart = this.selectionEnd = start + insertText.length;
             update();
+            return;
+        }
+
+        // 3. `(` 入力時の自動閉じ括弧 `)`
+        if (e.key === '(' && editorSettings.autoCloseParen) {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            const val = this.value;
+            const selected = val.substring(start, end);
+            this.value = val.substring(0, start) + '(' + selected + ')' + val.substring(end);
+            this.selectionStart = start + 1;
+            this.selectionEnd = end + 1;
+            update();
+            return;
+        }
+
+        // 4. `"` 入力時の自動閉じダブルクォーテーション `"`
+        if (e.key === '"' && editorSettings.autoCloseQuote) {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            const val = this.value;
+            const selected = val.substring(start, end);
+            this.value = val.substring(0, start) + '"' + selected + '"' + val.substring(end);
+            this.selectionStart = start + 1;
+            this.selectionEnd = end + 1;
+            update();
+            return;
         }
     });
 
@@ -396,28 +567,27 @@ function buildMemoryItemsHtml() {
 function renderMemoryUI() {
     const memDiv = document.getElementById('memory');
     const html = buildMemoryItemsHtml();
-    memDiv.innerHTML = html;
+    if (memDiv) memDiv.innerHTML = html;
     syncPopupMemory();
 }
 
-function appendOutputAndErrors(output, errors, isReplace = false, currentLineDisplay = '-', warnings = []) {
-    const outDiv = document.getElementById('output');
-    if (isReplace) {
-        outDiv.innerHTML = '';
-    }
+function appendCmdlineMessages(errors, warnings, echoCmd = null) {
+    const logDiv = document.getElementById('cmdline-log');
+    if (!logDiv) return;
 
-    if (output) {
-        const span = document.createElement('span');
-        span.textContent = output;
-        outDiv.appendChild(span);
+    if (echoCmd !== null && cleanText(echoCmd) !== '') {
+        const echoEl = document.createElement('div');
+        echoEl.className = 'cmd-echo-text';
+        echoEl.textContent = '> ' + echoCmd.split('\n').join(' : ');
+        logDiv.appendChild(echoEl);
     }
 
     if (warnings && warnings.length > 0) {
         for (const w of warnings) {
             const warnDiv = document.createElement('div');
-            warnDiv.className = 'warn-text';
+            warnDiv.className = w.indexOf('stop命令により') !== -1 ? 'info-text' : 'warn-text';
             warnDiv.textContent = w;
-            outDiv.appendChild(warnDiv);
+            logDiv.appendChild(warnDiv);
         }
     }
 
@@ -426,15 +596,58 @@ function appendOutputAndErrors(output, errors, isReplace = false, currentLineDis
             const errDiv = document.createElement('div');
             errDiv.className = 'error-text';
             errDiv.textContent = err;
-            outDiv.appendChild(errDiv);
+            logDiv.appendChild(errDiv);
         }
     }
 
-    outDiv.scrollTop = outDiv.scrollHeight;
-    document.getElementById('exec-stats').innerText = 'Line: ' + currentLineDisplay + ' | InPtr: ' + state.inputPtr + ' | Steps: ' + state.totalSteps;
+    logDiv.scrollTop = logDiv.scrollHeight;
+    syncPopupCmdline();
+}
+
+function clearCmdlineLog() {
+    const logDiv = document.getElementById('cmdline-log');
+    if (logDiv) logDiv.innerHTML = '';
+    syncPopupCmdline();
+}
+
+function appendOutputAndErrors(output, errors, isReplace = false, currentLineDisplay = '-', warnings = [], echoCmd = null) {
+    const outDiv = document.getElementById('output');
+    if (outDiv) {
+        if (isReplace) {
+            outDiv.innerHTML = '';
+        }
+        if (output) {
+            const span = document.createElement('span');
+            span.textContent = output;
+            outDiv.appendChild(span);
+        }
+        outDiv.scrollTop = outDiv.scrollHeight;
+    }
+
+    appendCmdlineMessages(errors, warnings, echoCmd);
+
+    const nextLineLabel = (state.pc >= 0 && state.pc < getMainCodeLinesArray().length) ? (state.pc + 1) : '-';
+    const statsEl = document.getElementById('exec-stats');
+    if (statsEl) {
+        statsEl.innerText = 'Next: ' + nextLineLabel + ' | InPtr: ' + state.inputPtr + ' | Steps: ' + state.totalSteps;
+    }
     renderMemoryUI();
     updateLineNumbers();
     syncPopupOutput();
+}
+
+function executeCommandLineString(cmdText) {
+    const trimmed = cleanText(cmdText);
+    if (trimmed === '') return;
+    syncMainFunctions();
+    const res = executeCasicCode(cmdText, 1, true);
+    appendOutputAndErrors(res.output, res.errors, false, 'Cmd', res.warnings, trimmed);
+}
+
+function runCommandLineFromMain() {
+    const inputEl = document.getElementById('cmdline-input');
+    if (!inputEl) return;
+    executeCommandLineString(inputEl.value);
 }
 
 // ==========================================
@@ -452,7 +665,8 @@ function openPopupWindow(type) {
     const titles = {
         input: 'CASIC - Input (入力データ編集)',
         output: 'CASIC - Output (出力結果確認)',
-        memory: 'CASIC - Memory (メモリ可視化)'
+        memory: 'CASIC - Memory (メモリ可視化)',
+        cmdline: 'CASIC - Command Line (コマンドライン・エラーログ)'
     };
 
     const specs = 'width=680,height=540,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes';
@@ -475,6 +689,10 @@ function openPopupWindow(type) {
         extraControlsHtml =
             '<label class="wrap-label"><input type="checkbox" id="chk-wrap" checked> 端で折り返す</label>' +
             '<button id="btn-clear-output" class="action-btn clear-btn">出力クリア</button>';
+    } else if (type === 'cmdline') {
+        extraControlsHtml =
+            '<label class="wrap-label"><input type="checkbox" id="chk-wrap" checked> 端で折り返す</label>' +
+            '<button id="btn-clear-cmdline" class="action-btn clear-btn">ログクリア</button>';
     }
 
     let bodyContentHtml = '';
@@ -484,6 +702,13 @@ function openPopupWindow(type) {
         bodyContentHtml = '<div id="popup-output-area" class="popup-output-area"></div>';
     } else if (type === 'memory') {
         bodyContentHtml = '<div id="popup-memory-area" class="popup-memory-area"></div>';
+    } else if (type === 'cmdline') {
+        bodyContentHtml =
+            '<div id="popup-cmdline-log" class="popup-output-area"></div>' +
+            '<div class="popup-cmd-row">' +
+                '<textarea id="popup-cmdline-input" spellcheck="false" placeholder="コマンドを入力 (cont, run 2:3, goto 2, step 2, またはCASICコード... Ctrl+Enterで実行)"></textarea>' +
+                '<button id="btn-popup-cmd-run" class="action-btn run-cmd-btn">実行</button>' +
+            '</div>';
     }
 
     const htmlDoc =
@@ -503,14 +728,21 @@ function openPopupWindow(type) {
         '.action-btn { padding: 5px 12px; font-size: 13px; font-weight: bold; color: #fff; border: none; border-radius: 4px; cursor: pointer; }' +
         '.update-btn { background-color: #0f8f62; }' +
         '.update-btn:hover { background-color: #0b6b49; }' +
+        '.run-cmd-btn { background-color: #007acc; width: 80px; height: 100%; font-size: 15px; }' +
+        '.run-cmd-btn:hover { background-color: #005f9e; }' +
         '.clear-btn { background-color: #555; font-weight: normal; font-size: 12px; }' +
         '.clear-btn:hover { background-color: #777; }' +
         '.update-msg { font-size: 12px; color: #4ec9b0; font-weight: bold; }' +
         '#popup-input-area { flex: 1; width: 100%; resize: none; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.5; white-space: pre-wrap; overflow: auto; outline: none; }' +
         '#popup-input-area:focus { border-color: #007acc; }' +
         '.popup-output-area { flex: 1; width: 100%; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.45; white-space: pre-wrap; word-break: break-all; overflow: auto; }' +
+        '.popup-cmd-row { display: flex; gap: 8px; height: 90px; flex-shrink: 0; }' +
+        '#popup-cmdline-input { flex: 1; resize: none; background: #252526; color: #d4d4d4; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.4; outline: none; }' +
+        '#popup-cmdline-input:focus { border-color: #007acc; }' +
         '.error-text { color: #ff6b6b; }' +
         '.warn-text { color: #dcdcaa; }' +
+        '.info-text { color: #4fc1ff; }' +
+        '.cmd-echo-text { color: #888; }' +
         '.popup-memory-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; font-size: var(--content-font-size); }' +
         '.memory-cell { width: 100%; min-height: 34px; display: flex; align-items: center; justify-content: space-between; box-sizing: border-box; padding: 6px 10px; border: 1px solid #555; background-color: #333; font-family: var(--vscode-font); border-radius: 4px; gap: 12px; flex-shrink: 0; overflow: hidden; }' +
         '.memory-cell.active { background-color: #094771; border-color: #00a8ff; color: white; }' +
@@ -544,7 +776,6 @@ function openPopupWindow(type) {
     win.document.write(htmlDoc);
     win.document.close();
 
-    // 文字サイズ変更イベントの設定
     const slider = win.document.getElementById('font-slider');
     const decBtn = win.document.getElementById('btn-font-dec');
     const incBtn = win.document.getElementById('btn-font-inc');
@@ -562,11 +793,13 @@ function openPopupWindow(type) {
     decBtn.addEventListener('click', function() { applyFontSize(popupFontSizes[type] - 2); });
     incBtn.addEventListener('click', function() { applyFontSize(popupFontSizes[type] + 2); });
 
-    // 端で折り返すチェックボックスの設定（改行位置の厳密な確認用）
     const chkWrap = win.document.getElementById('chk-wrap');
     if (chkWrap) {
         chkWrap.addEventListener('change', function() {
-            const targetEl = win.document.getElementById(type === 'input' ? 'popup-input-area' : 'popup-output-area');
+            let targetId = 'popup-output-area';
+            if (type === 'input') targetId = 'popup-input-area';
+            else if (type === 'cmdline') targetId = 'popup-cmdline-log';
+            const targetEl = win.document.getElementById(targetId);
             if (targetEl) {
                 targetEl.style.whiteSpace = chkWrap.checked ? 'pre-wrap' : 'pre';
                 targetEl.style.wordBreak = chkWrap.checked ? 'break-all' : 'normal';
@@ -574,7 +807,6 @@ function openPopupWindow(type) {
         });
     }
 
-    // Input専用の「更新」ボタン設定
     if (type === 'input') {
         const updateBtn = win.document.getElementById('btn-update-input');
         const popupInputArea = win.document.getElementById('popup-input-area');
@@ -593,9 +825,7 @@ function openPopupWindow(type) {
             }
         }
 
-        if (updateBtn) {
-            updateBtn.addEventListener('click', pushInputToMain);
-        }
+        if (updateBtn) updateBtn.addEventListener('click', pushInputToMain);
         if (popupInputArea) {
             popupInputArea.addEventListener('keydown', function(e) {
                 if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -606,12 +836,38 @@ function openPopupWindow(type) {
         }
     }
 
-    // Output専用の「出力クリア」ボタン設定
     if (type === 'output') {
         const clearBtn = win.document.getElementById('btn-clear-output');
         if (clearBtn) {
             clearBtn.addEventListener('click', function() {
                 clearOutputOnly();
+            });
+        }
+    }
+
+    if (type === 'cmdline') {
+        const clearBtn = win.document.getElementById('btn-clear-cmdline');
+        const runBtn = win.document.getElementById('btn-popup-cmd-run');
+        const cmdInput = win.document.getElementById('popup-cmdline-input');
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function() {
+                clearCmdlineLog();
+            });
+        }
+        function triggerPopupCmd() {
+            if (!cmdInput) return;
+            const mainCmdInput = document.getElementById('cmdline-input');
+            if (mainCmdInput) mainCmdInput.value = cmdInput.value;
+            executeCommandLineString(cmdInput.value);
+        }
+        if (runBtn) runBtn.addEventListener('click', triggerPopupCmd);
+        if (cmdInput) {
+            cmdInput.addEventListener('keydown', function(e) {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    triggerPopupCmd();
+                }
             });
         }
     }
@@ -649,10 +905,22 @@ function syncPopupMemory() {
     }
 }
 
+function syncPopupCmdline() {
+    const win = popupWindows.cmdline;
+    if (!win || win.closed) return;
+    const popupLog = win.document.getElementById('popup-cmdline-log');
+    const mainLog = document.getElementById('cmdline-log');
+    if (popupLog && mainLog) {
+        popupLog.innerHTML = mainLog.innerHTML;
+        popupLog.scrollTop = popupLog.scrollHeight;
+    }
+}
+
 function syncSpecificPopup(type) {
     if (type === 'input') syncPopupInput();
     else if (type === 'output') syncPopupOutput();
     else if (type === 'memory') syncPopupMemory();
+    else if (type === 'cmdline') syncPopupCmdline();
 }
 
 function syncMainFunctions() {
@@ -682,12 +950,13 @@ function setManualMemory() {
         }
         renderMemoryUI();
     } catch (e) {
-        alert('メモリ設定エラー: ' + e.message);
+        appendCmdlineMessages(['[メモリ設定エラー] ' + e.message], []);
     }
 }
 
 function clearOutputOnly() {
-    document.getElementById('output').innerHTML = '';
+    const outDiv = document.getElementById('output');
+    if (outDiv) outDiv.innerHTML = '';
     syncPopupOutput();
 }
 
@@ -702,6 +971,8 @@ function resetEngine() {
     state.inputPtr = 0;
     state.rngSeed = null;
     state.stepEvaluateBranch = false;
+    state.isStopped = false;
+    state.runEndLineIdx = null;
     state.lastModified = null;
     state.pc = 0;
     state.totalSteps = 0;
@@ -709,46 +980,42 @@ function resetEngine() {
 
     syncMainFunctions();
 
-    document.getElementById('output').innerHTML = '';
-    document.getElementById('exec-stats').innerText = 'Line: - | InPtr: 0 | Steps: 0';
+    const outDiv = document.getElementById('output');
+    if (outDiv) outDiv.innerHTML = '';
+    const logDiv = document.getElementById('cmdline-log');
+    if (logDiv) logDiv.innerHTML = '';
+    const statsEl = document.getElementById('exec-stats');
+    if (statsEl) statsEl.innerText = 'Next: 1 | InPtr: 0 | Steps: 0';
     renderMemoryUI();
     updateLineNumbers();
     syncPopupOutput();
+    syncPopupCmdline();
 }
 
 function runMain() {
     resetEngine();
     const code = document.getElementById('code').value;
-    const res = executeCasicCode(code, 1);
-    state.pc = 0;
+    const res = executeCasicCode(code, 1, false);
     appendOutputAndErrors(res.output, res.errors, true, 'All', res.warnings);
 }
 
 function stepMain() {
-    const lines = document.getElementById('code').value.split('\n');
+    const lines = getMainCodeLinesArray();
     if (state.pc >= lines.length || state.pc < 0) {
         state.pc = 0;
         state.stepEvaluateBranch = false;
     }
     const lineIdx = state.pc;
     state.warnings = [];
-    const labelScan = buildLabelMap(lines, 1);
-    const cfStructure = buildControlFlowStructure(lines, 1, true);
-    const res = executeLineWithControlFlow(lineIdx, lines, 1, labelScan.labels, cfStructure, state.stepEvaluateBranch);
-    const allErrors = labelScan.errors.concat(cfStructure.errors, res.errors);
-
-    if (res.nextLineIdx >= lines.length || res.halted) {
-        state.pc = 0;
-        state.stepEvaluateBranch = false;
-    } else {
-        state.pc = res.nextLineIdx;
-        state.stepEvaluateBranch = res.nextEvalBranch;
-    }
-    appendOutputAndErrors(res.output, allErrors, false, lineIdx + 1, state.warnings);
+    const res = runMainCodeSession({
+        endLineIdx: lines.length - 1,
+        maxSteps: 1
+    });
+    appendOutputAndErrors(res.output, res.errors, false, lineIdx + 1, state.warnings);
 }
 
 function runClickedLine(lineIdx) {
-    const lines = document.getElementById('code').value.split('\n');
+    const lines = getMainCodeLinesArray();
     if (lineIdx < 0 || lineIdx >= lines.length) return;
     state.pc = lineIdx;
     state.warnings = [];
@@ -766,12 +1033,17 @@ function runClickedLine(lineIdx) {
 
 function runSub(num) {
     syncMainFunctions();
-    const code = document.getElementById('sub-code' + num).value;
-    const res = executeCasicCode(code, 1);
+    const subEl = document.getElementById('sub-code' + num);
+    if (!subEl) return;
+    const code = subEl.value;
+    const res = executeCasicCode(code, 1, true);
     appendOutputAndErrors(res.output, res.errors, false, 'Sub' + num, res.warnings);
 }
 
 window.onload = function() {
+    loadEditorSettings();
+    initSettingsModalEvents();
+
     document.getElementById('input-data').value = [
         '3',
         '10 20',
@@ -779,42 +1051,45 @@ window.onload = function() {
         '50 60'
     ].join('\n');
 
-    // メイン側のInputを編集したときも開いているInput別窓へ自動同期
     document.getElementById('input-data').addEventListener('input', function() {
         syncPopupInput();
     });
 
+    const cmdInputEl = document.getElementById('cmdline-input');
+    if (cmdInputEl) {
+        cmdInputEl.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                runCommandLineFromMain();
+            }
+        });
+    }
+
     document.getElementById('code').value = [
-        '# 1. ネストの深さによる色分け確認 (fun -> for -> while -> if -> for)',
-        'fun check_nest(n)',
-        '    for(_i, n)',
-        '        _w = 0',
-        '        while(_w < 1)',
-        '            if(_i % 2 = 0)',
-        '                for(_k, 2)',
-        '                    _ans += _k',
-        '                end',
-        '            else',
-        '                _ans += 10',
-        '            end',
-        '            _w += 1',
-        '        end',
-        '    end',
-        '    return _ans',
+        'out "hello1"',
+        'out "hello2"',
+        'out "hello3"',
+        'out "hello4"',
+        'for(i, 10)',
+        '    put i',
+        '    if(i = 5) stop',
         'end',
-        'out "check_nest(4) = " & check_nest(4)',
-        '',
-        '# 2. とても長い文字列を変数に入れたときの横スクロール確認',
-        'long_str = rep("CASIC_LONG_STRING_TEST_", 10)',
-        'out "long_str length = " & len(long_str)'
+        'out'
     ].join('\n');
 
-    document.getElementById('sub-code1').value = 'out check_nest(6)';
-    document.getElementById('sub-code2').value = 'long_str &= "_APPENDED"';
-    document.getElementById('sub-code3').value = 'resetin : in n : in a[], b[] : out(,) a[] : out(,) b[]';
+    document.getElementById('cmdline-input').value = 'cont';
+
+    document.getElementById('sub-code1').value = [
+        'for(5)',
+        '    goto 6',
+        '    step 2',
+        'end'
+    ].join('\n');
+
+    document.getElementById('sub-code2').value = 'run 2:3';
 
     setupEditor('code', true);
-    for (let i = 1; i <= 3; i++) {
+    for (let i = 1; i <= 2; i++) {
         setupEditor('sub-code' + i, false);
     }
     syncMainFunctions();
