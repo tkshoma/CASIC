@@ -93,7 +93,7 @@
                 </div>
             </div>
 
-            <!-- 4段目：ボタン群（縦幅を広げた2段構成） -->
+            <!-- 4段目：ボタン群 -->
             <div class="button-cluster">
                 <div class="button-cluster-row">
                     <button onclick="runMain()">RUN</button>
@@ -129,7 +129,7 @@
         </div>
     </div>
 
-    <!-- 設定モーダル（タブ内オーバーレイ表示） -->
+    <!-- 設定モーダル -->
     <div id="settings-modal" class="modal-overlay hidden" onclick="handleModalOverlayClick(event)">
         <div class="modal-box">
             <div class="modal-header">
@@ -161,8 +161,14 @@
         </div>
     </div>
 
+    <!-- 細分化したJSファイルを順番に読み込む -->
+    <script src="casic-core.js"></script>
+    <script src="casic-math.js"></script>
     <script src="casic-expr.js"></script>
+    <script src="casic-funcs.js"></script>
     <script src="casic-cmd.js"></script>
+    <script src="casic-engine.js"></script>
+    <script src="casic-popup.js"></script>
     <script src="casic-ui.js"></script>
 </body>
 </html>
