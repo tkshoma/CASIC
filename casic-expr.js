@@ -26,8 +26,10 @@ function parseCasicArrayLiteralString(rawStr) {
             const evaluated = evaluateExpression(exprPart);
             return Array.isArray(evaluated) ? cloneArrayDeep(evaluated) : String(evaluated);
         }
-        if (p.startsWith('"') && p.endsWith('"') && p.length >= 2) {
-            return unescapeCasicString(p.slice(1, -1));
+        if ((p.startsWith('"') && p.endsWith('"')) || (p.startsWith("'") && p.endsWith("'"))) {
+            if (p.length >= 2) {
+                return unescapeCasicString(p.slice(1, -1));
+            }
         }
         if (p.startsWith('/')) {
             return unescapeCasicString(p.slice(1));
@@ -97,23 +99,24 @@ function findSlashStringEnd(str, slashIndex) {
 }
 
 function stripLineComment(line) {
-    let inQuotes = false;
+    let quoteChar = null;
     let i = 0;
     while (i < line.length) {
         const ch = line[i];
-        if (ch === '"' && line[i - 1] !== CHAR_BSLASH) {
-            inQuotes = !inQuotes;
+        if (ch === '"' || ch === "'") {
+            if (quoteChar === null) quoteChar = ch;
+            else if (quoteChar === ch) quoteChar = null;
             i++;
             continue;
         }
-        if (!inQuotes) {
+        if (quoteChar === null) {
             if (ch === '/' && isSlashStringStartInLine(line, i)) {
                 if (line[i + 1] !== '=' && line[i + 1] !== '.') {
                     i = findSlashStringEnd(line, i);
                     continue;
                 }
             }
-            if (ch === '#' || ch === "'") {
+            if (ch === '#') {
                 return line.slice(0, i);
             }
         }
@@ -137,19 +140,20 @@ function splitStatementsByColon(line) {
     const uncommented = stripLineComment(line);
     const statements = [];
     let current = '';
-    let inQuotes = false;
+    let quoteChar = null;
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
 
     for (let i = 0; i < uncommented.length; i++) {
         const ch = uncommented[i];
-        if (ch === '"' && uncommented[i - 1] !== CHAR_BSLASH) {
-            inQuotes = !inQuotes;
+        if (ch === '"' || ch === "'") {
+            if (quoteChar === null) quoteChar = ch;
+            else if (quoteChar === ch) quoteChar = null;
             current += ch;
             continue;
         }
-        if (!inQuotes) {
+        if (quoteChar === null) {
             if (ch === '(') parenDepth++;
             else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
             else if (ch === '[') bracketDepth++;
@@ -180,19 +184,20 @@ function splitStatementsByColon(line) {
 function splitTopLevelComma(str) {
     const items = [];
     let current = '';
-    let inQuotes = false;
+    let quoteChar = null;
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
 
     for (let i = 0; i < str.length; i++) {
         const ch = str[i];
-        if (ch === '"' && str[i - 1] !== CHAR_BSLASH) {
-            inQuotes = !inQuotes;
+        if (ch === '"' || ch === "'") {
+            if (quoteChar === null) quoteChar = ch;
+            else if (quoteChar === ch) quoteChar = null;
             current += ch;
             continue;
         }
-        if (!inQuotes) {
+        if (quoteChar === null) {
             if (ch === '(') parenDepth++;
             else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
             else if (ch === '[') bracketDepth++;
@@ -219,14 +224,15 @@ function extractParenHead(str) {
     if (!s.startsWith('(')) return null;
 
     let depth = 0;
-    let inQuotes = false;
+    let quoteChar = null;
     for (let i = 0; i < s.length; i++) {
         const ch = s[i];
-        if (ch === '"' && s[i - 1] !== CHAR_BSLASH) {
-            inQuotes = !inQuotes;
+        if (ch === '"' || ch === "'") {
+            if (quoteChar === null) quoteChar = ch;
+            else if (quoteChar === ch) quoteChar = null;
             continue;
         }
-        if (!inQuotes) {
+        if (quoteChar === null) {
             if (ch === '/' && isSlashStringStartInLine(s, i)) {
                 if (s[i + 1] !== '=' && s[i + 1] !== '.') {
                     i = findSlashStringEnd(s, i) - 1;
@@ -266,9 +272,11 @@ function tokenizeExpression(exprStr) {
             continue;
         }
 
-        if (ch === '"') {
+        // 処理順1: "" または '' による文字列化（"\" などもそのまま閉じられるよう同じクォート文字で終端）
+        if (ch === '"' || ch === "'") {
+            const q = ch;
             let end = i + 1;
-            while (end < len && !(exprStr[end] === '"' && exprStr[end - 1] !== CHAR_BSLASH)) {
+            while (end < len && exprStr[end] !== q) {
                 end++;
             }
             const rawStr = exprStr.slice(i + 1, end);
@@ -285,13 +293,14 @@ function tokenizeExpression(exprStr) {
 
         if (ch === '[' && !afterValue) {
             let depth = 0;
-            let inQ = false;
+            let quoteChar = null;
             let end = i;
             while (end < len) {
                 const c = exprStr[end];
-                if (c === '"' && exprStr[end - 1] !== CHAR_BSLASH) {
-                    inQ = !inQ;
-                } else if (!inQ) {
+                if (c === '"' || c === "'") {
+                    if (quoteChar === null) quoteChar = c;
+                    else if (quoteChar === c) quoteChar = null;
+                } else if (quoteChar === null) {
                     if (c === '[') depth++;
                     else if (c === ']') {
                         depth--;
@@ -315,13 +324,14 @@ function tokenizeExpression(exprStr) {
 
         if (ch === '{' && !afterValue) {
             let depth = 0;
-            let inQ = false;
+            let quoteChar = null;
             let end = i;
             while (end < len) {
                 const c = exprStr[end];
-                if (c === '"' && exprStr[end - 1] !== CHAR_BSLASH) {
-                    inQ = !inQ;
-                } else if (!inQ) {
+                if (c === '"' || c === "'") {
+                    if (quoteChar === null) quoteChar = c;
+                    else if (quoteChar === c) quoteChar = null;
+                } else if (quoteChar === null) {
                     if (c === '{') depth++;
                     else if (c === '}') {
                         depth--;
@@ -689,19 +699,33 @@ function parseAndEvaluateTokens(tokens) {
     }
 
     function parseRelational() {
-        let left = parseShift();
+        const first = parseShift();
+        const ops = [];
+        const operands = [first];
+
         while (true) {
             const t = peek();
             if (t && t.type === 'OP' && (t.value === '<' || t.value === '<=' || t.value === '>' || t.value === '>=')) {
-                const op = consume().value;
-                const right = parseShift();
-                const res = applyRelationalOp(left.value, right.value, op);
-                left = { value: res, isTrueSpecial: false };
+                ops.push(consume().value);
+                operands.push(parseShift());
             } else {
                 break;
             }
         }
-        return left;
+
+        if (ops.length === 0) {
+            return first;
+        }
+
+        let allTrue = true;
+        for (let i = 0; i < ops.length; i++) {
+            const stepRes = applyRelationalOp(operands[i].value, operands[i + 1].value, ops[i]);
+            if (stepRes !== "1") {
+                allTrue = false;
+                break;
+            }
+        }
+        return { value: allTrue ? "1" : "0", isTrueSpecial: false };
     }
 
     function parseShift() {

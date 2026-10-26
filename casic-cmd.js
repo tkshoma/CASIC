@@ -156,15 +156,16 @@ function tryExecuteBracketAssignment(trimmed) {
     if (trimmed[i] !== '[') return null;
 
     let depth = 0;
-    let inQuotes = false;
+    let quoteChar = null;
     let closeBracketIdx = -1;
     for (let j = i; j < trimmed.length; j++) {
         const ch = trimmed[j];
-        if (ch === '"' && trimmed[j - 1] !== CHAR_BSLASH) {
-            inQuotes = !inQuotes;
+        if ((ch === '"' || ch === "'") && trimmed[j - 1] !== CHAR_BSLASH) {
+            if (quoteChar === null) quoteChar = ch;
+            else if (quoteChar === ch) quoteChar = null;
             continue;
         }
-        if (!inQuotes) {
+        if (quoteChar === null) {
             if (ch === '[') depth++;
             else if (ch === ']') {
                 depth--;
@@ -402,24 +403,26 @@ function tryExecuteVariableAssignment(trimmed) {
 // 3. 配列・変数・辞書の操作命令 (4章・5章・7章)
 // ==========================================
 
+// 改訂仕様：sort(n) a1[], a2[], ... の複数配列連動ソートにも対応
 function executeSortOrRevCommand(cmdLower, restRaw) {
     const parsed = parseCommandOptionAndTarget(restRaw);
-    const targetName = cleanText(parsed.targetStr);
-    if (targetName === '') {
+    const targetArgs = splitCommandTargetArgs(parsed.targetStr);
+    if (targetArgs.length === 0 || cleanText(targetArgs[0]) === '') {
         throw new Error(cmdLower + '命令の対象となる変数または配列を指定してください');
     }
 
-    const isArrayTarget = targetName.endsWith('[]') || (hasArray(targetName) && !Object.prototype.hasOwnProperty.call(state.vars, targetName.toLowerCase()));
+    const firstTarget = cleanText(targetArgs[0]);
 
     if (cmdLower === 'rev') {
+        const isArrayTarget = firstTarget.endsWith('[]') || (hasArray(firstTarget) && !Object.prototype.hasOwnProperty.call(state.vars, firstTarget.toLowerCase()));
         if (isArrayTarget) {
-            const arr = cloneArrayDeep(getArray(targetName));
+            const arr = cloneArrayDeep(getArray(firstTarget));
             arr.reverse();
-            setArray(targetName, arr);
+            setArray(firstTarget, arr);
         } else {
-            const str = toDisplayString(getVar(targetName));
+            const str = toDisplayString(getVar(firstTarget));
             const reversed = Array.from(str).reverse().join('');
-            setVar(targetName, reversed);
+            setVar(firstTarget, reversed);
         }
         return;
     }
@@ -429,8 +432,40 @@ function executeSortOrRevCommand(cmdLower, restRaw) {
         nLimit = Math.max(0, Math.trunc(parseCasicNumber(evaluateExpression(parsed.optStr)).num));
     }
 
+    // 複数配列が指定された場合：配列 a1 をソートし、その動きに連動させて a2, a3... も並び替える
+    if (targetArgs.length >= 2) {
+        const primaryName = cleanText(targetArgs[0]);
+        const primaryArr = cloneArrayDeep(getArray(primaryName));
+        const count = Math.min(primaryArr.length, nLimit);
+
+        const indices = [];
+        for (let i = 0; i < count; i++) {
+            indices.push(i);
+        }
+
+        const cmpFunc = (cmdLower === 'sort') ? compareCasicNumericSort : compareCasicDictSort;
+        indices.sort(function(idxA, idxB) {
+            return cmpFunc(primaryArr[idxA], primaryArr[idxB]);
+        });
+
+        for (let t = 0; t < targetArgs.length; t++) {
+            const arrName = cleanText(targetArgs[t]);
+            const origArr = cloneArrayDeep(getArray(arrName));
+            const nextArr = origArr.slice();
+            for (let i = 0; i < count; i++) {
+                const srcIdx = indices[i];
+                nextArr[i] = (srcIdx < origArr.length) ? origArr[srcIdx] : "";
+            }
+            setArray(arrName, nextArr);
+        }
+        return;
+    }
+
+    // 引数が1つの場合
+    const isArrayTarget = firstTarget.endsWith('[]') || (hasArray(firstTarget) && !Object.prototype.hasOwnProperty.call(state.vars, firstTarget.toLowerCase()));
+
     if (isArrayTarget) {
-        const arr = cloneArrayDeep(getArray(targetName));
+        const arr = cloneArrayDeep(getArray(firstTarget));
         const count = Math.min(arr.length, nLimit);
         const head = arr.slice(0, count);
         const tail = arr.slice(count);
@@ -439,13 +474,13 @@ function executeSortOrRevCommand(cmdLower, restRaw) {
         } else {
             head.sort(compareCasicDictSort);
         }
-        setArray(targetName, head.concat(tail));
+        setArray(firstTarget, head.concat(tail));
     } else {
-        const chars = Array.from(toDisplayString(getVar(targetName)));
+        const chars = Array.from(toDisplayString(getVar(firstTarget)));
         const count = Math.min(chars.length, nLimit);
         const head = chars.slice(0, count).sort();
         const tail = chars.slice(count);
-        setVar(targetName, head.concat(tail).join(''));
+        setVar(firstTarget, head.concat(tail).join(''));
     }
 }
 
@@ -760,16 +795,17 @@ function splitInTargetList(targetStr) {
     let current = '';
     let bracketDepth = 0;
     let parenDepth = 0;
-    let inQuotes = false;
+    let quoteChar = null;
 
     for (let i = 0; i < s.length; i++) {
         const ch = s[i];
-        if (ch === '"' && s[i - 1] !== CHAR_BSLASH) {
-            inQuotes = !inQuotes;
+        if ((ch === '"' || ch === "'") && s[i - 1] !== CHAR_BSLASH) {
+            if (quoteChar === null) quoteChar = ch;
+            else if (quoteChar === ch) quoteChar = null;
             current += ch;
             continue;
         }
-        if (!inQuotes) {
+        if (quoteChar === null) {
             if (ch === '[') bracketDepth++;
             else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
             else if (ch === '(') parenDepth++;
@@ -1011,8 +1047,10 @@ function parseToLabelLiteral(rawArg, lineNum) {
         return { label: null, error: '[Line ' + lineNum + '] to命令には変数・式($)は指定できません: ' + s };
     }
     let literal = s;
-    if (literal.startsWith('"') && literal.endsWith('"') && literal.length >= 2) {
-        literal = unescapeCasicString(literal.slice(1, -1));
+    if ((literal.startsWith('"') && literal.endsWith('"')) || (literal.startsWith("'") && literal.endsWith("'"))) {
+        if (literal.length >= 2) {
+            literal = unescapeCasicString(literal.slice(1, -1));
+        }
     } else if (literal.startsWith('/')) {
         literal = unescapeCasicString(literal.slice(1));
     }
@@ -1034,8 +1072,10 @@ function evaluateGoTargetLabel(rawArg, lineNum) {
     }
 
     let literal = s;
-    if (literal.startsWith('"') && literal.endsWith('"') && literal.length >= 2) {
-        literal = unescapeCasicString(literal.slice(1, -1));
+    if ((literal.startsWith('"') && literal.endsWith('"')) || (literal.startsWith("'") && literal.endsWith("'"))) {
+        if (literal.length >= 2) {
+            literal = unescapeCasicString(literal.slice(1, -1));
+        }
     } else if (literal.startsWith('/')) {
         literal = unescapeCasicString(literal.slice(1));
     }
@@ -1063,7 +1103,7 @@ function buildLabelMap(lines, startLineOffset = 1) {
 
             if (matchAssignmentOp(restTrimmed) !== null || restTrimmed.startsWith('[') || restTrimmed.startsWith('{')) continue;
 
-            if (wordLower === 'to' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '"' || rest[0] === '/')) {
+            if (wordLower === 'to' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '"' || rest[0] === "'" || rest[0] === '/')) {
                 const parsed = parseToLabelLiteral(restTrimmed, lineNum);
                 if (parsed.error) {
                     errors.push(parsed.error);
@@ -1147,7 +1187,7 @@ function executeStatement(stmtRaw, lineNum) {
                 action: { type: 'stop' }
             };
         }
-        if (cmdLower === 'js' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '"' || rest[0] === '/' || rest[0] === '(')) {
+        if (cmdLower === 'js' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '"' || rest[0] === "'" || rest[0] === '/' || rest[0] === '(')) {
             executeJsCommand(rest);
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
@@ -1157,7 +1197,7 @@ function executeStatement(stmtRaw, lineNum) {
             }
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
-        if (cmdLower === 'return' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(' || rest[0] === '"' || rest[0] === '/' || rest[0] === '[' || rest[0] === '{')) {
+        if (cmdLower === 'return' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(' || rest[0] === '"' || rest[0] === "'" || rest[0] === '/' || rest[0] === '[' || rest[0] === '{')) {
             const retVal = restTrimmed === '' ? "" : evaluateExpression(restTrimmed);
             return {
                 output: flushFunctionOutput(''),

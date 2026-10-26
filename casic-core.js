@@ -137,7 +137,8 @@ function unescapeCasicString(str) {
         .split(CHAR_BSLASH + 's').join(' ')
         .split(CHAR_BSLASH + 'n').join('\n')
         .split(CHAR_BSLASH + 't').join('\t')
-        .split(CHAR_BSLASH + '"').join('"');
+        .split(CHAR_BSLASH + '"').join('"')
+        .split(CHAR_BSLASH + "'").join("'");
 }
 
 function xor32(a, b) {
@@ -263,7 +264,8 @@ const FUNCTION_ALIASES = {
     'd_json': 'json',
     'd_g_shape': 'g_shape',
     'd_g_image': 'g_image',
-    'd_g_text': 'g_text'
+    'd_g_text': 'g_text',
+    'd_a_sound': 'a_sound'
 };
 
 function normalizeFunctionName(funcNameLower) {
@@ -285,6 +287,7 @@ const COMMAND_KEYWORDS = new Set([
     'uniq', 'l_uniq',
     'seed', 'rename', 'stop', 'return', 'fun', 'wait', 'js',
     'g_size', 'g_smooth', 'g_clear', 'g_line', 'g_poly', 'g_rect', 'g_circle', 'g_image', 'g_text',
+    'a_play', 'a_stop',
     'cont', 'run', 'goto', 'step'
 ]);
 
@@ -306,7 +309,8 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'squeeze', 's_squeeze', 'at', 's_at', 'l_at', 'd_at',
     'join', 'l_join', 'grid', 'l_grid', 'flat', 'l_flat', 'bs', 'l_bs', 'uniq', 'l_uniq',
     'has', 'd_has', 'keys', 'key', 'd_keys', 'd_key', 'json', 'd_json',
-    'g_shape', 'd_g_shape', 'g_image', 'd_g_image', 'g_text', 'd_g_text'
+    'g_shape', 'd_g_shape', 'g_image', 'd_g_image', 'g_text', 'd_g_text',
+    'a_sound', 'd_a_sound'
 ]);
 
 const ASSIGN_OPS = ['/.=', '+=', '-=', '&=', '*=', '/=', '%=', '='];

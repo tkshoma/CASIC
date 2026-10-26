@@ -2,6 +2,15 @@
 // 組み込み関数 (1章〜9章) & 関数呼び出しディスパッチ
 // ==========================================
 
+// 新規追加された between / s_between を組み込み関数テーブルに登録
+if (typeof BUILTIN_FUNCTION_NAMES !== 'undefined') {
+    BUILTIN_FUNCTION_NAMES.add('between');
+    BUILTIN_FUNCTION_NAMES.add('s_between');
+}
+if (typeof FUNCTION_ALIASES !== 'undefined') {
+    FUNCTION_ALIASES['s_between'] = 'between';
+}
+
 function executeSqueezeFunction(args) {
     if (args.length < 2) return args[0] ? toDisplayString(args[0]) : "";
     const s1 = toDisplayString(args[0]);
@@ -45,6 +54,141 @@ function executeSqueezeFunction(args) {
     return out;
 }
 
+// 改訂仕様：between(s1, s2, s3, n) 関数ヘルパー
+// 文字列s1の中でs2とs3の間にある文字列を取り出し配列型で返す。
+// 入れ子の場合、n>0なら内側からn番目、n<0なら外側から|n|番目の深さの範囲を取り出し、
+// 対応が取れていない場合は多い側の最も外側のものを無視する。
+function executeBetweenFunction(args) {
+    if (args.length < 3) return [];
+    const s1 = toDisplayString(args[0]);
+    const s2 = toDisplayString(args[1]);
+    const s3 = toDisplayString(args[2]);
+    const n = (args.length >= 4 && cleanText(args[3]) !== '')
+        ? Math.trunc(parseCasicNumber(args[3]).num)
+        : 1;
+
+    if (s2 === '' || s3 === '' || n === 0) return [];
+
+    // s2 と s3 が同じ文字列の場合（入れ子なし、先頭から2個ずつペアリングし余った末尾を無視）
+    if (s2 === s3) {
+        if (n !== 1 && n !== -1) return [];
+        const positions = [];
+        let pos = 0;
+        while (pos <= s1.length - s2.length) {
+            const idx = s1.indexOf(s2, pos);
+            if (idx === -1) break;
+            positions.push(idx);
+            pos = idx + s2.length;
+        }
+        const results = [];
+        for (let i = 0; i + 1 < positions.length; i += 2) {
+            const startIdx = positions[i] + s2.length;
+            const endIdx = positions[i + 1];
+            results.push(s1.slice(startIdx, endIdx));
+        }
+        return results;
+    }
+
+    // s2 !== s3 の場合：スタックで括弧対応をとる（これにより多い側の最も外側のトークンが自動的に無視される）
+    const openStack = [];
+    const pairs = [];
+    let i = 0;
+
+    while (i < s1.length) {
+        const matchOpen = s1.startsWith(s2, i);
+        const matchClose = s1.startsWith(s3, i);
+
+        if (matchOpen && matchClose) {
+            // 万一 s2 と s3 の一方が他方の接頭辞だった場合は長い方を優先
+            if (s2.length >= s3.length) {
+                openStack.push({ start: i, end: i + s2.length });
+                i += s2.length;
+            } else {
+                if (openStack.length > 0) {
+                    const op = openStack.pop();
+                    pairs.push({ openStart: op.start, openEnd: op.end, closeStart: i, closeEnd: i + s3.length, children: [], parent: null });
+                }
+                i += s3.length;
+            }
+        } else if (matchOpen) {
+            openStack.push({ start: i, end: i + s2.length });
+            i += s2.length;
+        } else if (matchClose) {
+            if (openStack.length > 0) {
+                const op = openStack.pop();
+                pairs.push({ openStart: op.start, openEnd: op.end, closeStart: i, closeEnd: i + s3.length, children: [], parent: null });
+            }
+            i += s3.length;
+        } else {
+            i++;
+        }
+    }
+
+    if (pairs.length === 0) return [];
+
+    // 開始位置の昇順（外側から内側の順）にソート
+    pairs.sort(function(a, b) {
+        return a.openStart - b.openStart;
+    });
+
+    // 親子関係（包含関係）の構築
+    for (let j = 0; j < pairs.length; j++) {
+        const child = pairs[j];
+        let bestParent = null;
+        for (let k = j - 1; k >= 0; k--) {
+            const cand = pairs[k];
+            if (cand.openStart < child.openStart && cand.closeEnd >= child.closeEnd) {
+                bestParent = cand;
+                break;
+            }
+        }
+        if (bestParent) {
+            child.parent = bestParent;
+            bestParent.children.push(child);
+        }
+    }
+
+    // 外側からの深さ (outerDepth: 根が1、子が親+1)
+    for (let j = 0; j < pairs.length; j++) {
+        const p = pairs[j];
+        p.outerDepth = p.parent ? (p.parent.outerDepth + 1) : 1;
+    }
+
+    // 内側からの深さ (innerDepth: 葉が1、親が max(子のinnerDepth)+1)
+    function computeInnerDepth(node) {
+        if (node.children.length === 0) {
+            node.innerDepth = 1;
+            return 1;
+        }
+        let maxChild = 0;
+        for (let c = 0; c < node.children.length; c++) {
+            const d = computeInnerDepth(node.children[c]);
+            if (d > maxChild) maxChild = d;
+        }
+        node.innerDepth = maxChild + 1;
+        return node.innerDepth;
+    }
+
+    for (let j = 0; j < pairs.length; j++) {
+        if (!pairs[j].parent) {
+            computeInnerDepth(pairs[j]);
+        }
+    }
+
+    // 条件に合う深さのペアから文字列を抽出
+    const targetDepth = Math.abs(n);
+    const outList = [];
+    for (let j = 0; j < pairs.length; j++) {
+        const p = pairs[j];
+        const depthToCheck = (n > 0) ? p.innerDepth : p.outerDepth;
+        if (depthToCheck === targetDepth) {
+            outList.push(s1.slice(p.openEnd, p.closeStart));
+        }
+    }
+
+    return outList;
+}
+
 function executeAtFunction(argResults) {
     if (argResults.length < 2) return "";
     let current = resolveArgAsCollectionOrValue(argResults[0]);
@@ -73,6 +217,57 @@ function executeAtFunction(argResults) {
         return formatDictAsJsonString(current);
     }
     return String(current);
+}
+
+function executeBinarySearchFunction(targetArr, x, opStr) {
+    const mode = cleanText(opStr || '>=');
+    const n = targetArr.length;
+
+    if (mode === '>=' || mode === '') {
+        let lo = 0;
+        let hi = n;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (compareCasicNumericSort(targetArr[mid], x) < 0) lo = mid + 1;
+            else hi = mid;
+        }
+        return String(lo + 1);
+    }
+
+    if (mode === '>') {
+        let lo = 0;
+        let hi = n;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (compareCasicNumericSort(targetArr[mid], x) <= 0) lo = mid + 1;
+            else hi = mid;
+        }
+        return String(lo + 1);
+    }
+
+    if (mode === '<=') {
+        let lo = 0;
+        let hi = n;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (compareCasicNumericSort(targetArr[mid], x) <= 0) lo = mid + 1;
+            else hi = mid;
+        }
+        return String(lo);
+    }
+
+    if (mode === '<') {
+        let lo = 0;
+        let hi = n;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (compareCasicNumericSort(targetArr[mid], x) < 0) lo = mid + 1;
+            else hi = mid;
+        }
+        return String(lo);
+    }
+
+    throw new Error('bs関数の第3引数（不等号）には ">=", ">", "<=", "<" のいずれかを指定してください');
 }
 
 function callBuiltinFunction(rawFuncNameLower, argResults) {
@@ -439,6 +634,9 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
     if (funcNameLower === 'squeeze') {
         return executeSqueezeFunction(args);
     }
+    if (funcNameLower === 'between') {
+        return executeBetweenFunction(args);
+    }
     if (funcNameLower === 'at') {
         return executeAtFunction(argResults);
     }
@@ -504,17 +702,11 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         const target = resolveArgAsCollectionOrValue(argResults[0]);
         if (!Array.isArray(target)) return "0";
         const x = args[1];
-        let lo = 0;
-        let hi = target.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (compareCasicNumericSort(target[mid], x) < 0) lo = mid + 1;
-            else hi = mid;
-        }
-        return String(lo + 1);
+        const opStr = args.length >= 3 ? toDisplayString(args[2]) : '>=';
+        return executeBinarySearchFunction(target, x, opStr);
     }
 
-    // 9. 辞書・JSON・描画初期辞書の関数
+    // 9. 辞書・JSON・描画/音声初期辞書の関数
     if (funcNameLower === 'has') {
         if (args.length < 2) return "0";
         const dictObj = resolveArgAsDict(argResults[0]);
@@ -551,6 +743,12 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
             "x": "0", "y": "0", "w": "300", "h": "",
             "rot": "0", "color": "#000000", "font": "",
             "size": "30", "align": "left", "valign": "up", "alpha": "1"
+        };
+    }
+    if (funcNameLower === 'a_sound') {
+        return {
+            "vol": "1", "loop": "0", "pitch": "1",
+            "pan": "0", "start": "0", "end": ""
         };
     }
 

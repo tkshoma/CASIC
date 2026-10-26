@@ -19,6 +19,7 @@ const editorSettings = {
     tabSpaces: 4,
     autoIndent: true,
     autoCloseParen: true,
+    autoCloseBracket: true,
     autoCloseQuote: true
 };
 
@@ -37,6 +38,9 @@ function loadEditorSettings() {
             if (typeof parsed.autoCloseParen === 'boolean') {
                 editorSettings.autoCloseParen = parsed.autoCloseParen;
             }
+            if (typeof parsed.autoCloseBracket === 'boolean') {
+                editorSettings.autoCloseBracket = parsed.autoCloseBracket;
+            }
             if (typeof parsed.autoCloseQuote === 'boolean') {
                 editorSettings.autoCloseQuote = parsed.autoCloseQuote;
             }
@@ -52,22 +56,40 @@ function saveEditorSettings() {
     }
 }
 
+function ensureBracketSettingItemExists() {
+    if (document.getElementById('setting-auto-bracket')) return;
+    const parenChk = document.getElementById('setting-auto-paren');
+    if (!parenChk || !parenChk.parentElement || !parenChk.parentElement.parentElement) return;
+    const modalBody = parenChk.parentElement.parentElement;
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'setting-item';
+    itemDiv.innerHTML =
+        '<label for="setting-auto-bracket">「[」入力時の自動閉じ括弧「]」</label>' +
+        '<input type="checkbox" id="setting-auto-bracket" checked>';
+    modalBody.insertBefore(itemDiv, parenChk.parentElement.nextSibling);
+}
+
 function syncSettingsModalInputs() {
+    ensureBracketSettingItemExists();
     const tabInput = document.getElementById('setting-tab-spaces');
     const indentChk = document.getElementById('setting-auto-indent');
     const parenChk = document.getElementById('setting-auto-paren');
+    const bracketChk = document.getElementById('setting-auto-bracket');
     const quoteChk = document.getElementById('setting-auto-quote');
 
     if (tabInput) tabInput.value = String(editorSettings.tabSpaces);
     if (indentChk) indentChk.checked = editorSettings.autoIndent;
     if (parenChk) parenChk.checked = editorSettings.autoCloseParen;
+    if (bracketChk) bracketChk.checked = editorSettings.autoCloseBracket;
     if (quoteChk) quoteChk.checked = editorSettings.autoCloseQuote;
 }
 
 function initSettingsModalEvents() {
+    ensureBracketSettingItemExists();
     const tabInput = document.getElementById('setting-tab-spaces');
     const indentChk = document.getElementById('setting-auto-indent');
     const parenChk = document.getElementById('setting-auto-paren');
+    const bracketChk = document.getElementById('setting-auto-bracket');
     const quoteChk = document.getElementById('setting-auto-quote');
 
     if (tabInput) {
@@ -87,6 +109,12 @@ function initSettingsModalEvents() {
     if (parenChk) {
         parenChk.addEventListener('change', function() {
             editorSettings.autoCloseParen = parenChk.checked;
+            saveEditorSettings();
+        });
+    }
+    if (bracketChk) {
+        bracketChk.addEventListener('change', function() {
+            editorSettings.autoCloseBracket = bracketChk.checked;
             saveEditorSettings();
         });
     }
@@ -130,94 +158,173 @@ const suggestState = {
     selectedIndex: -1
 };
 
+// HTML側に #suggest-bar が無い場合でも確実に生成して取得する
+function getOrCreateSuggestBar() {
+    let bar = document.getElementById('suggest-bar');
+    if (!bar) {
+        const codeContainer = document.getElementById('code-container');
+        if (codeContainer && codeContainer.parentElement) {
+            bar = document.createElement('div');
+            bar.id = 'suggest-bar';
+            bar.className = 'suggest-bar';
+            bar.innerHTML = '<span class="suggest-placeholder">予測変換: 文字を入力すると候補が表示されます (Tabで選択 / Tab+数字で直接指定)</span>';
+            codeContainer.parentElement.insertBefore(bar, codeContainer.nextSibling);
+        }
+    }
+    return bar;
+}
+
 function resetSuggestCycle() {
     suggestState.isCycling = false;
     suggestState.selectedIndex = -1;
 }
 
-// コード内の変数・配列・辞書・ユーザー定義関数名をスキャンして候補に加える
+// スコープエラーを起こさずに辞書かどうか判定するヘルパー
+function isKnownDictNameSafe(name) {
+    const key = stripDictSuffix(name);
+    return Object.prototype.hasOwnProperty.call(state.dicts, key);
+}
+
+// 単一ステートメント文字列から定義されている変数・配列・辞書・関数名を抽出する
+function extractSymbolsFromStatement(stmtRaw, varMap, funcSet) {
+    const stmt = cleanText(stmtRaw);
+    if (!stmt) return;
+
+    // 1. fun 関数名(引数...) [code]
+    if (stmt.length > 4 && stmt.slice(0, 3).toLowerCase() === 'fun' && isSpaceChar(stmt[3])) {
+        const parsedFun = parseFunHeader(stmt.slice(4));
+        if (!parsedFun.error) {
+            funcSet.add(parsedFun.funcNameLower);
+            parsedFun.params.forEach(function(p) { varMap.set(p, p); });
+            if (parsedFun.inlineCode) {
+                extractSymbolsFromStatement(parsedFun.inlineCode, varMap, funcSet);
+            }
+        }
+        return;
+    }
+
+    // 2. if / elseif / for / while のヘッダとインラインコード
+    const cmdLen = readCommandWordLength(stmt);
+    if (cmdLen > 0) {
+        const rawCmd = stmt.slice(0, cmdLen).toLowerCase();
+        const normCmd = normalizeCommandName(rawCmd);
+        const restAfterCmd = cleanText(stmt.slice(cmdLen));
+
+        if (rawCmd === 'for') {
+            const paren = extractParenHead(restAfterCmd);
+            if (paren) {
+                const parts = splitTopLevelComma(paren.inside);
+                if (parts.length === 2 && isValidVarIdentifier(parts[0])) {
+                    const vName = cleanText(parts[0]);
+                    varMap.set(vName.toLowerCase(), vName);
+                }
+                if (paren.after) {
+                    extractSymbolsFromStatement(paren.after, varMap, funcSet);
+                }
+                return;
+            }
+        }
+
+        if (rawCmd === 'if' || rawCmd === 'elseif' || rawCmd === 'while') {
+            const paren = extractParenHead(restAfterCmd);
+            if (paren && paren.after) {
+                extractSymbolsFromStatement(paren.after, varMap, funcSet);
+                return;
+            }
+        }
+
+        if (rawCmd === 'else' && restAfterCmd !== '' && matchAssignmentOp(restAfterCmd) === null) {
+            extractSymbolsFromStatement(restAfterCmd, varMap, funcSet);
+            return;
+        }
+
+        // in / charin / allin 命令で代入される変数・配列の抽出
+        if (normCmd === 'in' && matchAssignmentOp(restAfterCmd) === null && !restAfterCmd.startsWith('[')) {
+            const parsedIn = parseCommandOptionAndTarget(restAfterCmd);
+            const inTargets = splitInTargetList(parsedIn.targetStr);
+            for (let tIdx = 0; tIdx < inTargets.length; tIdx++) {
+                const spec = parseArrayTargetSpec(inTargets[tIdx]);
+                if (spec.hasExplicitBrackets && isValidVarIdentifier(spec.name)) {
+                    varMap.set(spec.name.toLowerCase() + '[]', spec.name + '[]');
+                } else if (isValidVarIdentifier(inTargets[tIdx])) {
+                    const vName = cleanText(inTargets[tIdx]);
+                    varMap.set(vName.toLowerCase(), vName);
+                }
+            }
+            return;
+        }
+
+        if ((normCmd === 'charin' || normCmd === 'allin') && matchAssignmentOp(restAfterCmd) === null && !restAfterCmd.startsWith('[')) {
+            const parsedChar = parseCommandOptionAndTarget(restAfterCmd);
+            const vName = cleanText(parsedChar.targetStr);
+            if (isValidVarIdentifier(vName)) {
+                varMap.set(vName.toLowerCase(), vName);
+            }
+            return;
+        }
+    }
+
+    // 3. 代入文の左辺 (v = ..., a[] = ..., d{} = ...)
+    if (isVarStartChar(stmt[0])) {
+        let i = 1;
+        while (i < stmt.length && isIdentPartChar(stmt[i])) i++;
+        const ident = stmt.slice(0, i);
+        const lowerIdent = ident.toLowerCase();
+        if (!COMMAND_KEYWORDS.has(lowerIdent)) {
+            const rest = cleanText(stmt.slice(i));
+            if (rest.startsWith('[]') || (rest.startsWith('[') && !isKnownDictNameSafe(ident))) {
+                varMap.set(lowerIdent + '[]', ident + '[]');
+            } else if (rest.startsWith('{}')) {
+                varMap.set(lowerIdent + '{}', ident + '{}');
+            } else if (matchAssignmentOp(rest) !== null) {
+                varMap.set(lowerIdent, ident);
+            }
+        }
+    }
+}
+
 function collectCodeSymbols() {
     const varMap = new Map();
     const funcSet = new Set();
 
-    // 1. 組み込み定数とメモリ内の変数・配列・辞書・関数
-    varMap.set('true', 'true');
-    varMap.set('false', 'false');
-    Object.keys(state.vars).forEach(function(k) { varMap.set(k.toLowerCase(), k); });
-    Object.keys(state.arrays).forEach(function(k) { varMap.set(k.toLowerCase() + '[]', k + '[]'); });
-    Object.keys(state.dicts).forEach(function(k) { varMap.set(k.toLowerCase() + '{}', k + '{}'); });
-    Object.keys(state.functions).forEach(function(k) { funcSet.add(k.toLowerCase()); });
+    try {
+        varMap.set('true', 'true');
+        varMap.set('false', 'false');
+        Object.keys(state.vars).forEach(function(k) { varMap.set(k.toLowerCase(), k); });
+        Object.keys(state.arrays).forEach(function(k) { varMap.set(k.toLowerCase() + '[]', k + '[]'); });
+        Object.keys(state.dicts).forEach(function(k) { varMap.set(k.toLowerCase() + '{}', k + '{}'); });
+        Object.keys(state.functions).forEach(function(k) { funcSet.add(k.toLowerCase()); });
 
-    // 2. エディタに書かれているコードからも変数・配列・辞書・関数名を抽出
-    const editorIds = ['code', 'sub-code1', 'sub-code2'];
-    for (let eIdx = 0; eIdx < editorIds.length; eIdx++) {
-        const el = document.getElementById(editorIds[eIdx]);
-        if (!el) continue;
-        const lines = String(el.value).split('\n');
-        for (let lIdx = 0; lIdx < lines.length; lIdx++) {
-            const stmts = splitStatementsByColon(lines[lIdx]);
-            for (let sIdx = 0; sIdx < stmts.length; sIdx++) {
-                const stmt = cleanText(stmts[sIdx]);
-                if (!stmt) continue;
-
-                // fun 関数名(引数...) の抽出
-                if (stmt.length > 4 && stmt.slice(0, 3).toLowerCase() === 'fun' && isSpaceChar(stmt[3])) {
-                    const parsedFun = parseFunHeader(stmt.slice(4));
-                    if (!parsedFun.error) {
-                        funcSet.add(parsedFun.funcNameLower);
-                        parsedFun.params.forEach(function(p) { varMap.set(p, p); });
-                    }
-                    continue;
-                }
-
-                // for(i, n) のカウンタ変数抽出
-                if (stmt.length > 4 && stmt.slice(0, 3).toLowerCase() === 'for') {
-                    const paren = extractParenHead(stmt.slice(3));
-                    if (paren && paren.inside.indexOf(',') !== -1) {
-                        const parts = splitTopLevelComma(paren.inside);
-                        if (parts.length === 2 && isValidVarIdentifier(parts[0])) {
-                            const vName = cleanText(parts[0]);
-                            varMap.set(vName.toLowerCase(), vName);
-                        }
-                    }
-                }
-
-                // 代入文の左辺 (v = ..., a[] = ..., d{} = ...) の抽出
-                if (isVarStartChar(stmt[0])) {
-                    let i = 1;
-                    while (i < stmt.length && isIdentPartChar(stmt[i])) i++;
-                    const ident = stmt.slice(0, i);
-                    const lowerIdent = ident.toLowerCase();
-                    if (!COMMAND_KEYWORDS.has(lowerIdent)) {
-                        const rest = cleanText(stmt.slice(i));
-                        if (rest.startsWith('[]') || (rest.startsWith('[') && !hasDict(ident))) {
-                            varMap.set(lowerIdent + '[]', ident + '[]');
-                        } else if (rest.startsWith('{}')) {
-                            varMap.set(lowerIdent + '{}', ident + '{}');
-                        } else if (matchAssignmentOp(rest) !== null) {
-                            varMap.set(lowerIdent, ident);
-                        }
-                    }
+        const editorIds = ['code', 'sub-code1', 'sub-code2'];
+        for (let eIdx = 0; eIdx < editorIds.length; eIdx++) {
+            const el = document.getElementById(editorIds[eIdx]);
+            if (!el) continue;
+            const lines = String(el.value).split('\n');
+            for (let lIdx = 0; lIdx < lines.length; lIdx++) {
+                const stmts = splitStatementsByColon(lines[lIdx]);
+                for (let sIdx = 0; sIdx < stmts.length; sIdx++) {
+                    extractSymbolsFromStatement(stmts[sIdx], varMap, funcSet);
                 }
             }
         }
+    } catch (e) {
+        // 解析途中の未完成な構文があってもサジェスト自体は止めない
     }
 
     return { varMap: varMap, funcSet: funcSet };
 }
 
-// キャレット位置の文脈（インデントのみか、文頭/コロン直後の命令か、引数の場所か）を解析する
 function analyzeCursorSuggestContext(text, cursorPos) {
-    const lineStart = text.lastIndexOf('\n', cursorPos - 1) + 1;
-    const lineBeforeCursor = text.slice(lineStart, cursorPos);
+    const safePos = Math.max(0, Math.min(text.length, cursorPos));
+    const lineStart = (safePos === 0) ? 0 : (text.lastIndexOf('\n', safePos - 1) + 1);
+    const lineBeforeCursor = text.slice(lineStart, safePos);
 
     // 1. その行のキャレット以前に空白以外の文字がない場合 -> インデントモード
     if (cleanText(lineBeforeCursor) === '') {
         return { hasTextBeforeCursor: false };
     }
 
-    // 2. 文字列リテラル "..." 内やコメント # ' 内かどうかチェック
-    let inQuotes = false;
+    let quoteChar = null;
     let lastColonOutsideParens = -1;
     let parenDepth = 0;
     let bracketDepth = 0;
@@ -225,23 +332,23 @@ function analyzeCursorSuggestContext(text, cursorPos) {
 
     for (let i = 0; i < lineBeforeCursor.length; i++) {
         const ch = lineBeforeCursor[i];
-        if (ch === '"' && lineBeforeCursor[i - 1] !== CHAR_BSLASH) {
-            inQuotes = !inQuotes;
+        if (ch === '"' || ch === "'") {
+            if (quoteChar === null) quoteChar = ch;
+            else if (quoteChar === ch) quoteChar = null;
             continue;
         }
-        if (!inQuotes) {
+        if (quoteChar === null) {
             if (ch === '/' && isSlashStringStartInLine(lineBeforeCursor, i)) {
                 if (lineBeforeCursor[i + 1] !== '=' && lineBeforeCursor[i + 1] !== '.') {
                     const slashEnd = findSlashStringEnd(lineBeforeCursor, i);
                     if (slashEnd >= lineBeforeCursor.length) {
-                        // スラッシュ文字列を入力中
                         return { hasTextBeforeCursor: true, inStringOrComment: true };
                     }
                     i = slashEnd - 1;
                     continue;
                 }
             }
-            if (ch === '#' || ch === "'") {
+            if (ch === '#') {
                 return { hasTextBeforeCursor: true, inStringOrComment: true };
             }
             if (ch === '(') parenDepth++;
@@ -258,12 +365,15 @@ function analyzeCursorSuggestContext(text, cursorPos) {
         }
     }
 
-    if (inQuotes) {
+    if (quoteChar !== null) {
         return { hasTextBeforeCursor: true, inStringOrComment: true };
     }
 
-    // 3. カーソル直前の入力中トークン（prefix）を切り出す
+    // カーソル直前の入力中トークン（prefix）を切り出す（rand. などの末尾ドットも考慮）
     let wordStartInLine = lineBeforeCursor.length;
+    if (wordStartInLine > 0 && lineBeforeCursor[wordStartInLine - 1] === '.') {
+        wordStartInLine--;
+    }
     while (wordStartInLine > 0) {
         const prevCh = lineBeforeCursor[wordStartInLine - 1];
         if (isVarStartChar(prevCh) || isIdentPartChar(prevCh) || isDigitChar(prevCh)) {
@@ -273,12 +383,12 @@ function analyzeCursorSuggestContext(text, cursorPos) {
         }
     }
     const prefix = lineBeforeCursor.slice(wordStartInLine);
-    if (prefix.length > 0 && isDigitChar(prefix[0])) {
-        // 数字リテラル入力中はサジェストしない
+
+    // まだ識別子文字を1文字も打っていない（スペースや開き括弧の直後）または数字リテラルの場合はサジェストしない
+    if (prefix === '' || isDigitChar(prefix[0]) || prefix === '.') {
         return { hasTextBeforeCursor: true, inStringOrComment: true };
     }
 
-    // 4. 文脈判定：文頭または `:` の直後なら「命令(cmd)」、それ以外なら「引数の場所＝関数・変数(arg)」
     const stmtStartInLine = (lastColonOutsideParens !== -1) ? (lastColonOutsideParens + 1) : 0;
     const beforeWordInStmt = cleanText(lineBeforeCursor.slice(stmtStartInLine, wordStartInLine));
 
@@ -286,7 +396,6 @@ function analyzeCursorSuggestContext(text, cursorPos) {
     if (beforeWordInStmt === '' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
         contextType = 'cmd';
     } else {
-        // 1行 if(b) や elseif(b) や else や for(...) や while(b) の直後の命令位置も cmd として扱う
         const ctrlCheck = classifyControlLine(lineBeforeCursor.slice(stmtStartInLine, wordStartInLine));
         if ((ctrlCheck.kind === 'if_multi' || ctrlCheck.kind === 'for_multi' || ctrlCheck.kind === 'while_multi' || ctrlCheck.kind === 'elseif' || ctrlCheck.kind === 'else') && ctrlCheck.inlineCode === '') {
             contextType = 'cmd';
@@ -299,32 +408,45 @@ function analyzeCursorSuggestContext(text, cursorPos) {
         contextType: contextType,
         prefix: prefix,
         replaceStart: lineStart + wordStartInLine,
-        replaceEnd: cursorPos
+        replaceEnd: safePos
     };
 }
 
-// 入力された prefix と文脈からサジェスト候補リストを生成する
-// 優先度: (先頭一致) -> (途中一致)
 function buildSuggestionsList(prefix, contextType) {
     const pLower = String(prefix || '').toLowerCase();
+    if (pLower === '') return [];
+
     const rawItems = [];
+    const symbols = collectCodeSymbols();
 
     if (contextType === 'cmd') {
-        // 命令のサジェスト（水色）
+        // 文頭や `:` の直後：命令（水色 [c]）をメインに出しつつ、左辺での代入用に既知の変数（オレンジ [v]）も候補に含める
         COMMAND_KEYWORDS.forEach(function(cmd) {
             rawItems.push({
                 key: cmd.toLowerCase(),
                 display: '[c]' + cmd,
                 insertText: cmd,
                 isFunc: false,
+                typeOrder: 1,
                 colorClass: 'kind-cyan'
             });
         });
-    } else {
-        // 引数の場所：関数（水色）および変数（オレンジ色）のサジェスト
-        const symbols = collectCodeSymbols();
 
-        // 組み込み関数 + ユーザー定義関数
+        symbols.varMap.forEach(function(origName, lowerKey) {
+            if (lowerKey === 'true' || lowerKey === 'false') return;
+            const pureKey = lowerKey.replace(/\[\]$/, '').replace(/\{\}$/, '');
+            if (COMMAND_KEYWORDS.has(pureKey)) return;
+            rawItems.push({
+                key: pureKey,
+                display: '[v]' + origName,
+                insertText: origName,
+                isFunc: false,
+                typeOrder: 2,
+                colorClass: 'kind-orange'
+            });
+        });
+    } else {
+        // 引数の場所：関数（水色 [f]）および変数（オレンジ [v]）
         const allFuncs = new Set(BUILTIN_FUNCTION_NAMES);
         symbols.funcSet.forEach(function(fn) { allFuncs.add(fn); });
 
@@ -334,11 +456,11 @@ function buildSuggestionsList(prefix, contextType) {
                 display: '[f]' + fn + '()',
                 insertText: fn + '()',
                 isFunc: true,
+                typeOrder: 1,
                 colorClass: 'kind-cyan'
             });
         });
 
-        // 変数・配列・辞書
         symbols.varMap.forEach(function(origName, lowerKey) {
             const pureKey = lowerKey.replace(/\[\]$/, '').replace(/\{\}$/, '');
             rawItems.push({
@@ -346,6 +468,7 @@ function buildSuggestionsList(prefix, contextType) {
                 display: '[v]' + origName,
                 insertText: origName,
                 isFunc: false,
+                typeOrder: 2,
                 colorClass: 'kind-orange'
             });
         });
@@ -356,30 +479,27 @@ function buildSuggestionsList(prefix, contextType) {
 
     for (let i = 0; i < rawItems.length; i++) {
         const item = rawItems[i];
-        if (pLower === '') {
-            prefixMatches.push(item);
-        } else if (item.key.indexOf(pLower) === 0) {
+        if (item.key.indexOf(pLower) === 0) {
             prefixMatches.push(item);
         } else if (item.key.indexOf(pLower) > 0) {
             substringMatches.push(item);
         }
     }
 
-    // 見やすさのため同じグループ内は文字数の短い順 → 辞書順で整列
-    function sortByLenAndAlpha(a, b) {
+    function sortCandidates(a, b) {
         if (a.key.length !== b.key.length) return a.key.length - b.key.length;
+        if (a.typeOrder !== b.typeOrder) return a.typeOrder - b.typeOrder;
         return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
     }
 
-    prefixMatches.sort(sortByLenAndAlpha);
-    substringMatches.sort(sortByLenAndAlpha);
+    prefixMatches.sort(sortCandidates);
+    substringMatches.sort(sortCandidates);
 
     return prefixMatches.concat(substringMatches);
 }
 
-// サジェストバーのDOM描画
 function renderSuggestBar() {
-    const bar = document.getElementById('suggest-bar');
+    const bar = getOrCreateSuggestBar();
     if (!bar) return;
 
     const list = suggestState.candidates;
@@ -410,17 +530,16 @@ function renderSuggestBar() {
     }
 }
 
-// エディタのカーソル位置からサジェスト候補を更新する
 function updateSuggestionsForEditor(textarea) {
-    if (suggestState.isCycling) return;
+    if (!textarea || suggestState.isCycling) return;
 
     suggestState.activeEditor = textarea;
+    const bar = getOrCreateSuggestBar();
     const ctx = analyzeCursorSuggestContext(textarea.value, textarea.selectionStart);
 
     if (!ctx.hasTextBeforeCursor || ctx.inStringOrComment) {
         suggestState.candidates = [];
         suggestState.selectedIndex = -1;
-        const bar = document.getElementById('suggest-bar');
         if (bar) {
             bar.innerHTML = '<span class="suggest-placeholder">予測変換: 文字を入力すると候補が表示されます (Tabで選択 / Tab+数字で直接指定)</span>';
         }
@@ -436,7 +555,6 @@ function updateSuggestionsForEditor(textarea) {
     renderSuggestBar();
 }
 
-// 指定したインデックスのサジェスト候補をエディタに適用する
 function applySuggestionByIndex(textarea, index, updateEditorCallback) {
     const list = suggestState.candidates;
     if (!list || index < 0 || index >= list.length) return false;
@@ -449,7 +567,6 @@ function applySuggestionByIndex(textarea, index, updateEditorCallback) {
     let insertStr = item.insertText;
     const afterText = val.slice(end);
 
-    // もし関数の補完で、すでに直後に `(` がある場合は `()` を重複させない
     let placeCursorInsideParen = false;
     if (item.isFunc) {
         if (afterText.startsWith('(')) {
@@ -462,8 +579,6 @@ function applySuggestionByIndex(textarea, index, updateEditorCallback) {
     textarea.value = val.slice(0, start) + insertStr + afterText;
     const newEnd = start + insertStr.length;
 
-    // 関数 `replace()` を挿入した場合はキャレットを `replace(|)` の中に置くとすぐ引数を入力でき、
-    // かつ suggestState.replaceEnd には `)` までを含めて記録しておくことで次のTab押下時にも綺麗に置換できる
     if (placeCursorInsideParen) {
         textarea.selectionStart = textarea.selectionEnd = newEnd - 1;
     } else {
@@ -608,9 +723,10 @@ function highlightCasic(text, cursorPos = -1) {
         while (i < line.length) {
             const ch = line[i];
 
-            if (ch === '"') {
+            if (ch === '"' || ch === "'") {
+                const q = ch;
                 let end = i + 1;
-                while (end < line.length && !(line[end] === '"' && line[end - 1] !== CHAR_BSLASH)) end++;
+                while (end < line.length && line[end] !== q) end++;
                 const token = line.slice(i, end + 1);
                 result += '<span style="color: #ce9178;">' + escapeHtml(token) + '</span>';
                 i = end + 1;
@@ -631,7 +747,7 @@ function highlightCasic(text, cursorPos = -1) {
                 }
             }
 
-            if (ch === '#' || ch === "'") {
+            if (ch === '#') {
                 const commentToken = line.slice(i);
                 result += '<span style="color: #6a9955;">' + escapeHtml(commentToken) + '</span>';
                 break;
@@ -757,10 +873,28 @@ function updateCodeStats() {
     }
 }
 
+function shouldAddExtraBlockIndent(lineBeforeCursor, lineAfterCursor) {
+    const afterUncommented = cleanText(stripLineComment(lineAfterCursor));
+    if (afterUncommented !== '') return false;
+
+    const info = classifyControlLine(lineBeforeCursor);
+    if (info.kind === 'if_multi' || info.kind === 'for_multi' || info.kind === 'while_multi' || info.kind === 'fun_multi') {
+        return true;
+    }
+    if ((info.kind === 'elseif' || info.kind === 'else') && (!info.inlineCode || info.inlineCode === '')) {
+        return true;
+    }
+    return false;
+}
+
 function setupEditor(id, isMain = false) {
     const textarea = document.getElementById(id);
     const highlightDiv = document.getElementById(id + '-highlight');
     const gutter = isMain ? document.getElementById('line-numbers') : null;
+
+    if (isMain) {
+        getOrCreateSuggestBar();
+    }
 
     const update = function() {
         highlightDiv.innerHTML = highlightCasic(textarea.value, textarea.selectionStart);
@@ -814,7 +948,7 @@ function setupEditor(id, isMain = false) {
     textarea.addEventListener('keydown', function(e) {
         if (e.isComposing) return;
 
-        // 0. Tabを押しながら数字キー (1〜9) を押した場合：その番号のサジェスト候補に直接変換
+        // 0. Tabを押しながら数字キー (1〜9) を押した場合
         if (suggestState.isTabHeld && e.key >= '1' && e.key <= '9') {
             e.preventDefault();
             const numIdx = parseInt(e.key, 10) - 1;
@@ -827,14 +961,12 @@ function setupEditor(id, isMain = false) {
             return;
         }
 
-        // 1. Tabキー：キャレット以前に文字がない場合はインデント、文字がある場合は予測変換
+        // 1. Tabキー
         if (e.key === 'Tab') {
             e.preventDefault();
             suggestState.isTabHeld = true;
 
-            // すでに予測変換のTabサイクル中の場合（2回目、3回目のTab押下）
             if (suggestState.isCycling && suggestState.activeEditor === this && suggestState.candidates.length > 0) {
-                // 長押しリピート時は勝手に進まないようにし、Tab+数字を押しやすくする
                 if (e.repeat) return;
                 const nextIdx = (suggestState.selectedIndex + 1) % suggestState.candidates.length;
                 applySuggestionByIndex(this, nextIdx, update);
@@ -843,7 +975,6 @@ function setupEditor(id, isMain = false) {
 
             const ctx = analyzeCursorSuggestContext(this.value, this.selectionStart);
 
-            // キャレット以前に空白以外の文字がない場合は今まで通りインデント
             if (!ctx.hasTextBeforeCursor) {
                 const spacesCount = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
                 const indentSpaces = ' '.repeat(spacesCount);
@@ -856,7 +987,6 @@ function setupEditor(id, isMain = false) {
                 return;
             }
 
-            // キャレット以前に文字がある場合はサジェストの1番目に変換
             if (e.repeat) return;
             updateSuggestionsForEditor(this);
             if (suggestState.candidates.length > 0) {
@@ -865,17 +995,19 @@ function setupEditor(id, isMain = false) {
             return;
         }
 
-        // Tab以外のキーが押されたらTabサイクル状態を解除
         resetSuggestCycle();
 
-        // 2. Enterキーによる自動インデント
+        // 2. Enterキーによる自動インデント（if / elseif / else / while / for / fun 直後の改行ではさらに1段インデント追加）
         if (e.key === 'Enter' && editorSettings.autoIndent) {
             e.preventDefault();
             const start = this.selectionStart;
             const end = this.selectionEnd;
             const val = this.value;
 
-            const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+            const lineStart = (start === 0) ? 0 : (val.lastIndexOf('\n', start - 1) + 1);
+            const nextNewlineIdx = val.indexOf('\n', end);
+            const lineEnd = (nextNewlineIdx === -1) ? val.length : nextNewlineIdx;
+
             let currentIndent = '';
             for (let i = lineStart; i < start; i++) {
                 const ch = val[i];
@@ -886,7 +1018,16 @@ function setupEditor(id, isMain = false) {
                 }
             }
 
-            const insertText = '\n' + currentIndent;
+            const lineBeforeCursor = val.slice(lineStart, start);
+            const lineAfterCursor = val.slice(end, lineEnd);
+            let extraIndent = '';
+
+            if (shouldAddExtraBlockIndent(lineBeforeCursor, lineAfterCursor)) {
+                const spacesCount = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
+                extraIndent = ' '.repeat(spacesCount);
+            }
+
+            const insertText = '\n' + currentIndent + extraIndent;
             this.value = val.substring(0, start) + insertText + val.substring(end);
             this.selectionStart = this.selectionEnd = start + insertText.length;
             update();
@@ -909,14 +1050,30 @@ function setupEditor(id, isMain = false) {
             return;
         }
 
-        // 4. `"` 入力時の自動閉じダブルクォーテーション `"`
-        if (e.key === '"' && editorSettings.autoCloseQuote) {
+        // 3.5 `[` 入力時の自動閉じ括弧 `]`
+        if (e.key === '[' && editorSettings.autoCloseBracket) {
             e.preventDefault();
             const start = this.selectionStart;
             const end = this.selectionEnd;
             const val = this.value;
             const selected = val.substring(start, end);
-            this.value = val.substring(0, start) + '"' + selected + '"' + val.substring(end);
+            this.value = val.substring(0, start) + '[' + selected + ']' + val.substring(end);
+            this.selectionStart = start + 1;
+            this.selectionEnd = end + 1;
+            update();
+            updateSuggestionsForEditor(this);
+            return;
+        }
+
+        // 4. `"` または `'` 入力時の自動閉じクォート
+        if ((e.key === '"' || e.key === "'") && editorSettings.autoCloseQuote) {
+            e.preventDefault();
+            const q = e.key;
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            const val = this.value;
+            const selected = val.substring(start, end);
+            this.value = val.substring(0, start) + q + selected + q + val.substring(end);
             this.selectionStart = start + 1;
             this.selectionEnd = end + 1;
             update();
@@ -1234,27 +1391,31 @@ window.onload = function() {
         });
     }
 
+    const BS = CHAR_BSLASH;
     document.getElementById('code').value = [
         'repair = "apple_pie"',
-        'out "hello1"',
-        'out "hello2"',
-        'for(i, 10)',
-        '    put i',
-        '    if(i = 5) stop',
-        'end',
-        'out'
+        '# 1. between関数のテスト (配列として ["aa/b\\"] と ["b"] が返る)',
+        'b1[] = between("/aa/b' + BS + BS + '", "/", "' + BS + '", -1)',
+        'b2[] = between("/aa/b' + BS + BS + '", "/", "' + BS + '", 1)',
+        'out join(b1[])',
+        'out join(b2[])',
+        '',
+        '# 2. 複数配列の連動ソート dsort a1[], a2[]',
+        'keys_arr[] = ["35", "6", "12", "1"]',
+        'vals_arr[] = ["A", "B", "C", "D"]',
+        'dsort keys_arr[], vals_arr[]',
+        'out(,) keys_arr[]',
+        'out(,) vals_arr[]'
     ].join('\n');
 
     document.getElementById('cmdline-input').value = 'cont';
 
     document.getElementById('sub-code1').value = [
-        'for(5)',
-        '    goto 5',
-        '    step 2',
-        'end'
+        'sound{} = a_sound()',
+        'out json(sound)'
     ].join('\n');
 
-    document.getElementById('sub-code2').value = 'run 2:3';
+    document.getElementById('sub-code2').value = 'run 2:6';
 
     setupEditor('code', true);
     for (let i = 1; i <= 2; i++) {
