@@ -8,7 +8,7 @@
 </head>
 <body>
     <div class="workspace">
-        <!-- 左カラム：Code（縦いっぱい） -->
+        <!-- 左カラム：Code（縦いっぱい）＋ 下部サジェストバー -->
         <div class="code-column">
             <div class="pane-header">
                 <h3>Code <span style="font-size:12px; font-weight:normal; color:#888;">(行番号クリックでその行だけ実行)</span></h3>
@@ -20,6 +20,10 @@
                     <div id="code-highlight" class="highlight-layer"></div>
                     <textarea id="code" class="code-textarea" spellcheck="false" placeholder="ここにCASICのコードを書く..."></textarea>
                 </div>
+            </div>
+            <!-- 予測変換（サジェストバー） -->
+            <div id="suggest-bar" class="suggest-bar">
+                <span class="suggest-placeholder">予測変換: 文字を入力すると候補が表示されます (Tabで選択 / Tab+数字で直接指定)</span>
             </div>
         </div>
 
@@ -161,7 +165,6 @@
         </div>
     </div>
 
-    <!-- 細分化したJSファイルを順番に読み込む -->
     <script src="casic-core.js"></script>
     <script src="casic-math.js"></script>
     <script src="casic-expr.js"></script>
