@@ -10,6 +10,9 @@ const bracketColors = [
     '#ffffff'  // 8重: 真っ白
 ];
 
+// メイン画面の出力欄が巨大文字列でフリーズしないための表示上限
+const MAIN_OUTPUT_DISPLAY_LIMIT = 20000;
+
 // ==========================================
 // 1. エディタ設定 & localStorage 保存・復元
 // ==========================================
@@ -158,7 +161,6 @@ const suggestState = {
     selectedIndex: -1
 };
 
-// HTML側に #suggest-bar が無い場合でも確実に生成して取得する
 function getOrCreateSuggestBar() {
     let bar = document.getElementById('suggest-bar');
     if (!bar) {
@@ -179,18 +181,15 @@ function resetSuggestCycle() {
     suggestState.selectedIndex = -1;
 }
 
-// スコープエラーを起こさずに辞書かどうか判定するヘルパー
 function isKnownDictNameSafe(name) {
     const key = stripDictSuffix(name);
     return Object.prototype.hasOwnProperty.call(state.dicts, key);
 }
 
-// 単一ステートメント文字列から定義されている変数・配列・辞書・関数名を抽出する
 function extractSymbolsFromStatement(stmtRaw, varMap, funcSet) {
     const stmt = cleanText(stmtRaw);
     if (!stmt) return;
 
-    // 1. fun 関数名(引数...) [code]
     if (stmt.length > 4 && stmt.slice(0, 3).toLowerCase() === 'fun' && isSpaceChar(stmt[3])) {
         const parsedFun = parseFunHeader(stmt.slice(4));
         if (!parsedFun.error) {
@@ -203,7 +202,6 @@ function extractSymbolsFromStatement(stmtRaw, varMap, funcSet) {
         return;
     }
 
-    // 2. if / elseif / for / while のヘッダとインラインコード
     const cmdLen = readCommandWordLength(stmt);
     if (cmdLen > 0) {
         const rawCmd = stmt.slice(0, cmdLen).toLowerCase();
@@ -238,7 +236,6 @@ function extractSymbolsFromStatement(stmtRaw, varMap, funcSet) {
             return;
         }
 
-        // in / charin / allin 命令で代入される変数・配列の抽出
         if (normCmd === 'in' && matchAssignmentOp(restAfterCmd) === null && !restAfterCmd.startsWith('[')) {
             const parsedIn = parseCommandOptionAndTarget(restAfterCmd);
             const inTargets = splitInTargetList(parsedIn.targetStr);
@@ -264,7 +261,6 @@ function extractSymbolsFromStatement(stmtRaw, varMap, funcSet) {
         }
     }
 
-    // 3. 代入文の左辺 (v = ..., a[] = ..., d{} = ...)
     if (isVarStartChar(stmt[0])) {
         let i = 1;
         while (i < stmt.length && isIdentPartChar(stmt[i])) i++;
@@ -308,7 +304,6 @@ function collectCodeSymbols() {
             }
         }
     } catch (e) {
-        // 解析途中の未完成な構文があってもサジェスト自体は止めない
     }
 
     return { varMap: varMap, funcSet: funcSet };
@@ -319,7 +314,6 @@ function analyzeCursorSuggestContext(text, cursorPos) {
     const lineStart = (safePos === 0) ? 0 : (text.lastIndexOf('\n', safePos - 1) + 1);
     const lineBeforeCursor = text.slice(lineStart, safePos);
 
-    // 1. その行のキャレット以前に空白以外の文字がない場合 -> インデントモード
     if (cleanText(lineBeforeCursor) === '') {
         return { hasTextBeforeCursor: false };
     }
@@ -369,7 +363,6 @@ function analyzeCursorSuggestContext(text, cursorPos) {
         return { hasTextBeforeCursor: true, inStringOrComment: true };
     }
 
-    // カーソル直前の入力中トークン（prefix）を切り出す（rand. などの末尾ドットも考慮）
     let wordStartInLine = lineBeforeCursor.length;
     if (wordStartInLine > 0 && lineBeforeCursor[wordStartInLine - 1] === '.') {
         wordStartInLine--;
@@ -384,7 +377,6 @@ function analyzeCursorSuggestContext(text, cursorPos) {
     }
     const prefix = lineBeforeCursor.slice(wordStartInLine);
 
-    // まだ識別子文字を1文字も打っていない（スペースや開き括弧の直後）または数字リテラルの場合はサジェストしない
     if (prefix === '' || isDigitChar(prefix[0]) || prefix === '.') {
         return { hasTextBeforeCursor: true, inStringOrComment: true };
     }
@@ -420,7 +412,6 @@ function buildSuggestionsList(prefix, contextType) {
     const symbols = collectCodeSymbols();
 
     if (contextType === 'cmd') {
-        // 文頭や `:` の直後：命令（水色 [c]）をメインに出しつつ、左辺での代入用に既知の変数（オレンジ [v]）も候補に含める
         COMMAND_KEYWORDS.forEach(function(cmd) {
             rawItems.push({
                 key: cmd.toLowerCase(),
@@ -446,7 +437,6 @@ function buildSuggestionsList(prefix, contextType) {
             });
         });
     } else {
-        // 引数の場所：関数（水色 [f]）および変数（オレンジ [v]）
         const allFuncs = new Set(BUILTIN_FUNCTION_NAMES);
         symbols.funcSet.forEach(function(fn) { allFuncs.add(fn); });
 
@@ -997,7 +987,7 @@ function setupEditor(id, isMain = false) {
 
         resetSuggestCycle();
 
-        // 2. Enterキーによる自動インデント（if / elseif / else / while / for / fun 直後の改行ではさらに1段インデント追加）
+        // 2. Enterキーによる自動インデント
         if (e.key === 'Enter' && editorSettings.autoIndent) {
             e.preventDefault();
             const start = this.selectionStart;
@@ -1209,20 +1199,35 @@ function clearCmdlineLog() {
     syncPopupCmdline();
 }
 
-function appendOutputAndErrors(output, errors, isReplace = false, currentLineDisplay = '-', warnings = [], echoCmd = null) {
+function renderMainOutputBox() {
     const outDiv = document.getElementById('output');
-    if (outDiv) {
-        if (isReplace) {
-            outDiv.innerHTML = '';
+    if (!outDiv) return;
+    const buf = state.outputBuffer || '';
+    if (buf.length > MAIN_OUTPUT_DISPLAY_LIMIT) {
+        outDiv.textContent =
+            '※出力が長いため末尾5,000文字のみ表示しています（全' +
+            buf.length.toLocaleString() +
+            '文字の確認・一括コピーはOutputの「別窓」を開いてください）\n\n' +
+            buf.slice(-5000);
+    } else {
+        outDiv.textContent = buf;
+    }
+    outDiv.scrollTop = outDiv.scrollHeight;
+}
+
+function appendOutputAndErrors(output, errors, isReplace = false, currentLineDisplay = '-', warnings = [], echoCmd = null) {
+    if (typeof state.outputBuffer !== 'string' || isReplace) {
+        state.outputBuffer = '';
+        if (typeof outputPagination !== 'undefined') {
+            outputPagination.currentPage = 1;
         }
-        if (output) {
-            const span = document.createElement('span');
-            span.textContent = output;
-            outDiv.appendChild(span);
-        }
-        outDiv.scrollTop = outDiv.scrollHeight;
     }
 
+    if (output) {
+        state.outputBuffer += output;
+    }
+
+    renderMainOutputBox();
     appendCmdlineMessages(errors, warnings, echoCmd);
 
     const nextLineLabel = (state.pc >= 0 && state.pc < getMainCodeLinesArray().length) ? (state.pc + 1) : '-';
@@ -1281,8 +1286,12 @@ function setManualMemory() {
 }
 
 function clearOutputOnly() {
-    const outDiv = document.getElementById('output');
-    if (outDiv) outDiv.innerHTML = '';
+    state.outputBuffer = '';
+    if (typeof outputPagination !== 'undefined') {
+        outputPagination.currentPage = 1;
+        outputPagination.totalPages = 1;
+    }
+    renderMainOutputBox();
     syncPopupOutput();
 }
 
@@ -1293,6 +1302,7 @@ function resetEngine() {
     state.functions = {};
     state.callStack = [];
     state.funcOutputBuffer = '';
+    state.outputBuffer = '';
     state.forStates = {};
     state.inputPtr = 0;
     state.rngSeed = null;
@@ -1304,10 +1314,14 @@ function resetEngine() {
     state.totalSteps = 0;
     state.warnings = [];
 
+    if (typeof outputPagination !== 'undefined') {
+        outputPagination.currentPage = 1;
+        outputPagination.totalPages = 1;
+    }
+
     syncMainFunctions();
 
-    const outDiv = document.getElementById('output');
-    if (outDiv) outDiv.innerHTML = '';
+    renderMainOutputBox();
     const logDiv = document.getElementById('cmdline-log');
     if (logDiv) logDiv.innerHTML = '';
     const statsEl = document.getElementById('exec-stats');
@@ -1370,6 +1384,8 @@ window.onload = function() {
     loadEditorSettings();
     initSettingsModalEvents();
 
+    state.outputBuffer = '';
+
     document.getElementById('input-data').value = [
         '3',
         '10 20',
@@ -1393,29 +1409,22 @@ window.onload = function() {
 
     const BS = CHAR_BSLASH;
     document.getElementById('code').value = [
-        'repair = "apple_pie"',
-        '# 1. between関数のテスト (配列として ["aa/b\\"] と ["b"] が返る)',
-        'b1[] = between("/aa/b' + BS + BS + '", "/", "' + BS + '", -1)',
-        'b2[] = between("/aa/b' + BS + BS + '", "/", "' + BS + '", 1)',
-        'out join(b1[])',
-        'out join(b2[])',
-        '',
-        '# 2. 複数配列の連動ソート dsort a1[], a2[]',
-        'keys_arr[] = ["35", "6", "12", "1"]',
-        'vals_arr[] = ["A", "B", "C", "D"]',
-        'dsort keys_arr[], vals_arr[]',
-        'out(,) keys_arr[]',
-        'out(,) vals_arr[]'
+        '# 1. 新規文字列関数 (between_replace / between_list / unescape / count)',
+        'out between_replace("<abc>def<geh>", "<", ">", "z")',
+        'out join(between_list("/aa/b' + BS + BS + '", "/", "' + BS + '", -1))',
+        'out unescape("&apos;&omega;&apos;おはよう")',
+        'out json(count([3, 1, 4, 1, 5, 9, 2, 6, 5]))',
+        'out "clamp=" & clamp(130, 0, 100)'
     ].join('\n');
 
     document.getElementById('cmdline-input').value = 'cont';
 
     document.getElementById('sub-code1').value = [
-        'sound{} = a_sound()',
-        'out json(sound)'
+        '# 大量出力（5000文字改ページ＆一括コピー確認用：約3万文字出力）',
+        'out rep("0123456789ABCDEF", 2000)'
     ].join('\n');
 
-    document.getElementById('sub-code2').value = 'run 2:6';
+    document.getElementById('sub-code2').value = 'run 1:5';
 
     setupEditor('code', true);
     for (let i = 1; i <= 2; i++) {

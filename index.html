@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CASIC Tester</title>
+    <!-- 仕様書標準搭載フォント (DotGothic16 / Zen Maru Gothic) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Zen+Maru+Gothic:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -104,9 +108,10 @@
                     <button class="step-btn" onclick="stepMain()">ステップ</button>
                     <button class="init-btn" onclick="resetEngine()">初期化</button>
                 </div>
-                <div class="button-cluster-row">
+                <div class="button-cluster-row button-cluster-row-4">
                     <button class="sub-btn" onclick="runSub(1)">実行1</button>
                     <button class="sub-btn" onclick="runSub(2)">実行2</button>
+                    <button class="import-btn" onclick="openImportModal()">インポート</button>
                     <button class="settings-btn" onclick="openSettingsModal()">設定</button>
                 </div>
             </div>
@@ -129,6 +134,78 @@
             </div>
             <div id="memory" class="memory-container">
                 <div class="memory-empty">メモリは空です</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- インポートモーダル（縦4段・同種横並び） -->
+    <div id="import-modal" class="modal-overlay hidden" onclick="handleImportModalOverlayClick(event)">
+        <div class="modal-box import-modal-box">
+            <div class="modal-header">
+                <div class="import-header-title">
+                    <h3>ファイルインポート (画像・音声・フォント・テキスト)</h3>
+                    <button class="small-tool-btn import-all-btn" onclick="triggerAssetFileInput('all')">＋ まとめて選択 (自動判別)</button>
+                    <input type="file" id="asset-file-all" class="hidden" multiple onchange="handleAssetFilesSelected(this.files, 'auto'); this.value='';">
+                </div>
+                <button class="modal-close-btn" onclick="closeImportModal()">×</button>
+            </div>
+
+            <div class="modal-body import-modal-body" id="import-drop-zone">
+                <!-- 1段目：画像 -->
+                <div class="asset-tier">
+                    <div class="asset-tier-header">
+                        <span class="asset-tier-title">1. 画像 <small id="count-asset-image">(0)</small></span>
+                        <button class="small-tool-btn" onclick="triggerAssetFileInput('image')">＋ 画像を追加</button>
+                        <input type="file" id="asset-file-image" class="hidden" accept="image/*" multiple onchange="handleAssetFilesSelected(this.files, 'image'); this.value='';">
+                    </div>
+                    <div id="asset-list-image" class="asset-row-list">
+                        <div class="asset-empty">インポートされた画像はありません (例: thonk.png)</div>
+                    </div>
+                </div>
+
+                <!-- 2段目：音声 -->
+                <div class="asset-tier">
+                    <div class="asset-tier-header">
+                        <span class="asset-tier-title">2. 音声 <small id="count-asset-audio">(0)</small></span>
+                        <button class="small-tool-btn" onclick="triggerAssetFileInput('audio')">＋ 音声を追加</button>
+                        <input type="file" id="asset-file-audio" class="hidden" accept="audio/*" multiple onchange="handleAssetFilesSelected(this.files, 'audio'); this.value='';">
+                    </div>
+                    <div id="asset-list-audio" class="asset-row-list">
+                        <div class="asset-empty">インポートされた音声はありません (例: pop.wav)</div>
+                    </div>
+                </div>
+
+                <!-- 3段目：フォント -->
+                <div class="asset-tier">
+                    <div class="asset-tier-header">
+                        <span class="asset-tier-title">3. フォント <small id="count-asset-font">(0)</small></span>
+                        <button class="small-tool-btn" onclick="triggerAssetFileInput('font')">＋ フォントを追加</button>
+                        <input type="file" id="asset-file-font" class="hidden" accept=".ttf,.otf,.woff,.woff2" multiple onchange="handleAssetFilesSelected(this.files, 'font'); this.value='';">
+                    </div>
+                    <div id="asset-list-font" class="asset-row-list">
+                        <div class="asset-empty">インポートされたフォントはありません (.ttf等 / 拡張子なしで指定可)</div>
+                    </div>
+                </div>
+
+                <!-- 4段目：テキスト -->
+                <div class="asset-tier">
+                    <div class="asset-tier-header">
+                        <span class="asset-tier-title">4. テキスト <small id="count-asset-text">(0)</small></span>
+                        <button class="small-tool-btn" onclick="triggerAssetFileInput('text')">＋ テキストを追加</button>
+                        <input type="file" id="asset-file-text" class="hidden" accept=".txt,.csv,.json,.md,.log,.casic,text/*" multiple onchange="handleAssetFilesSelected(this.files, 'text'); this.value='';">
+                    </div>
+                    <div id="asset-list-text" class="asset-row-list">
+                        <div class="asset-empty">インポートされたテキストはありません (.txt, .csv, .json等)</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <span class="setting-save-note">※この画面にファイルをドラッグ＆ドロップして追加することもできます</span>
+                <div style="display:flex; gap:8px;">
+                    <button class="small-tool-btn" onclick="clearAllImportedAssets()">すべて削除</button>
+                    <button class="modal-ok-btn" onclick="closeImportModal()">閉じる</button>
+                </div>
             </div>
         </div>
     </div>
@@ -169,13 +246,14 @@
         </div>
     </div>
 
-    <!-- 分割された全8つのJSファイルを順番に読み込む -->
+    <!-- 分割されたJSファイルを順番に読み込む -->
     <script src="casic-core.js"></script>
     <script src="casic-math.js"></script>
     <script src="casic-expr.js"></script>
     <script src="casic-funcs.js"></script>
     <script src="casic-cmd.js"></script>
     <script src="casic-engine.js"></script>
+    <script src="casic-assets.js"></script>
     <script src="casic-popup.js"></script>
     <script src="casic-ui.js"></script>
 </body>

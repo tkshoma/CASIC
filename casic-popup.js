@@ -16,6 +16,66 @@ const popupFontSizes = {
     cmdline: 15
 };
 
+// Output別窓のページネーション状態（1ページあたり5,000文字）
+const OUTPUT_PAGE_SIZE = 5000;
+const outputPagination = {
+    currentPage: 1,
+    totalPages: 1
+};
+
+function getFullOutputText() {
+    if (typeof state !== 'undefined' && typeof state.outputBuffer === 'string') {
+        return state.outputBuffer;
+    }
+    const mainOut = document.getElementById('output');
+    return mainOut ? (mainOut.textContent || '') : '';
+}
+
+function getOutputTotalPages(fullText) {
+    if (!fullText || fullText.length === 0) return 1;
+    return Math.ceil(fullText.length / OUTPUT_PAGE_SIZE);
+}
+
+function getOutputPageSlice(fullText, pageNum) {
+    if (!fullText || fullText.length === 0) return '';
+    const total = getOutputTotalPages(fullText);
+    const p = Math.max(1, Math.min(total, pageNum));
+    const start = (p - 1) * OUTPUT_PAGE_SIZE;
+    const end = Math.min(fullText.length, start + OUTPUT_PAGE_SIZE);
+    return fullText.slice(start, end);
+}
+
+function copyTextToClipboard(text, win, onSuccess) {
+    if (win && win.navigator && win.navigator.clipboard && win.navigator.clipboard.writeText) {
+        win.navigator.clipboard.writeText(text).then(function() {
+            if (onSuccess) onSuccess();
+        }).catch(function() {
+            fallbackCopyText(text, win, onSuccess);
+        });
+    } else {
+        fallbackCopyText(text, win, onSuccess);
+    }
+}
+
+function fallbackCopyText(text, win, onSuccess) {
+    const doc = (win && !win.closed) ? win.document : document;
+    const ta = doc.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '0';
+    doc.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+        doc.execCommand('copy');
+        if (onSuccess) onSuccess();
+    } catch (e) {
+        alert('コピーに失敗しました: ' + e.message);
+    }
+    doc.body.removeChild(ta);
+}
+
 function openPopupWindow(type) {
     const existing = popupWindows[type];
     if (existing && !existing.closed) {
@@ -26,12 +86,12 @@ function openPopupWindow(type) {
 
     const titles = {
         input: 'CASIC - Input (入力データ編集)',
-        output: 'CASIC - Output (出力結果確認)',
+        output: 'CASIC - Output (出力結果確認・5000文字改ページ)',
         memory: 'CASIC - Memory (メモリ可視化)',
         cmdline: 'CASIC - Command Line (コマンドライン・エラーログ)'
     };
 
-    const specs = 'width=680,height=540,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes';
+    const specs = 'width=740,height=580,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes';
     const win = window.open('', 'casic_popup_' + type, specs);
     if (!win) {
         alert('ポップアップウィンドウがブロックされました。ブラウザの設定でポップアップを許可してください。');
@@ -50,7 +110,9 @@ function openPopupWindow(type) {
     } else if (type === 'output') {
         extraControlsHtml =
             '<label class="wrap-label"><input type="checkbox" id="chk-wrap" checked> 端で折り返す</label>' +
-            '<button id="btn-clear-output" class="action-btn clear-btn">出力クリア</button>';
+            '<button id="btn-copy-all-output" class="action-btn update-btn" title="全ページの出力をまとめてコピーします">全ページを一括コピー</button>' +
+            '<button id="btn-clear-output" class="action-btn clear-btn">出力クリア</button>' +
+            '<span id="copy-msg" class="update-msg"></span>';
     } else if (type === 'cmdline') {
         extraControlsHtml =
             '<label class="wrap-label"><input type="checkbox" id="chk-wrap" checked> 端で折り返す</label>' +
@@ -61,7 +123,18 @@ function openPopupWindow(type) {
     if (type === 'input') {
         bodyContentHtml = '<textarea id="popup-input-area" spellcheck="false" placeholder="ここに入力データを書く..."></textarea>';
     } else if (type === 'output') {
-        bodyContentHtml = '<div id="popup-output-area" class="popup-output-area"></div>';
+        bodyContentHtml =
+            '<div class="pagination-bar">' +
+                '<div class="page-nav-buttons">' +
+                    '<button id="btn-page-first" class="page-btn" title="最初のページへ">|&lt;&lt;</button>' +
+                    '<button id="btn-page-prev" class="page-btn" title="前の5000文字へ">&lt; 前へ</button>' +
+                    '<span class="page-indicator">Page <input type="number" id="page-num-input" min="1" value="1"> / <span id="page-total-label">1</span></span>' +
+                    '<button id="btn-page-next" class="page-btn" title="次の5000文字へ">次へ &gt;</button>' +
+                    '<button id="btn-page-last" class="page-btn" title="最後のページへ">&gt;&gt;|</button>' +
+                '</div>' +
+                '<div class="page-stats-info" id="output-char-stats">全 0 文字 (0〜0文字目を表示)</div>' +
+            '</div>' +
+            '<div id="popup-output-area" class="popup-output-area"></div>';
     } else if (type === 'memory') {
         bodyContentHtml = '<div id="popup-memory-area" class="popup-memory-area"></div>';
     } else if (type === 'cmdline') {
@@ -78,14 +151,14 @@ function openPopupWindow(type) {
         '<title>' + titles[type] + '</title>' +
         '<style>' +
         ':root { --vscode-font: Menlo, Monaco, Consolas, "Courier New", monospace; --content-font-size: ' + initSize + 'px; }' +
-        'body { font-family: sans-serif; margin: 0; padding: 12px; background-color: #1e1e1e; color: #d4d4d4; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }' +
+        'body { font-family: sans-serif; margin: 0; padding: 12px; background-color: #1e1e1e; color: #d4d4d4; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }' +
         '.toolbar { display: flex; align-items: center; justify-content: space-between; background: #252526; padding: 8px 12px; border: 1px solid #444; border-radius: 6px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }' +
         '.font-controls { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #ccc; }' +
         '.size-btn { width: 28px; height: 26px; background: #3c3c3c; color: #fff; border: 1px solid #555; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 14px; }' +
         '.size-btn:hover { background: #007acc; border-color: #007acc; }' +
         '#font-slider { width: 100px; accent-color: #007acc; cursor: pointer; }' +
         '#font-size-label { font-family: var(--vscode-font); min-width: 42px; text-align: center; color: #9cdcfe; font-weight: bold; }' +
-        '.right-controls { display: flex; align-items: center; gap: 10px; }' +
+        '.right-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }' +
         '.wrap-label { font-size: 12px; color: #ccc; display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }' +
         '.action-btn { padding: 5px 12px; font-size: 13px; font-weight: bold; color: #fff; border: none; border-radius: 4px; cursor: pointer; }' +
         '.update-btn { background-color: #0f8f62; }' +
@@ -95,6 +168,14 @@ function openPopupWindow(type) {
         '.clear-btn { background-color: #555; font-weight: normal; font-size: 12px; }' +
         '.clear-btn:hover { background-color: #777; }' +
         '.update-msg { font-size: 12px; color: #4ec9b0; font-weight: bold; }' +
+        '.pagination-bar { display: flex; align-items: center; justify-content: space-between; background: #2d2d2d; padding: 6px 12px; border: 1px solid #444; border-radius: 6px; flex-wrap: wrap; gap: 8px; flex-shrink: 0; font-size: 13px; }' +
+        '.page-nav-buttons { display: flex; align-items: center; gap: 6px; }' +
+        '.page-btn { padding: 3px 9px; background: #3c3c3c; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }' +
+        '.page-btn:hover:not(:disabled) { background: #007acc; border-color: #007acc; color: #fff; }' +
+        '.page-btn:disabled { opacity: 0.4; cursor: default; }' +
+        '.page-indicator { display: inline-flex; align-items: center; gap: 4px; color: #ccc; font-family: var(--vscode-font); }' +
+        '#page-num-input { width: 58px; padding: 2px 4px; background: #1e1e1e; color: #9cdcfe; border: 1px solid #555; border-radius: 3px; font-family: var(--vscode-font); font-size: 13px; text-align: center; font-weight: bold; }' +
+        '.page-stats-info { font-family: var(--vscode-font); font-size: 12px; color: #aaa; }' +
         '#popup-input-area { flex: 1; width: 100%; resize: none; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.5; white-space: pre-wrap; overflow: auto; outline: none; }' +
         '#popup-input-area:focus { border-color: #007acc; }' +
         '.popup-output-area { flex: 1; width: 100%; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.45; white-space: pre-wrap; word-break: break-all; overflow: auto; }' +
@@ -200,9 +281,49 @@ function openPopupWindow(type) {
 
     if (type === 'output') {
         const clearBtn = win.document.getElementById('btn-clear-output');
+        const copyAllBtn = win.document.getElementById('btn-copy-all-output');
+        const copyMsg = win.document.getElementById('copy-msg');
+        const btnFirst = win.document.getElementById('btn-page-first');
+        const btnPrev = win.document.getElementById('btn-page-prev');
+        const btnNext = win.document.getElementById('btn-page-next');
+        const btnLast = win.document.getElementById('btn-page-last');
+        const pageInput = win.document.getElementById('page-num-input');
+
         if (clearBtn) {
             clearBtn.addEventListener('click', function() {
                 clearOutputOnly();
+            });
+        }
+
+        if (copyAllBtn) {
+            copyAllBtn.addEventListener('click', function() {
+                const fullText = getFullOutputText();
+                copyTextToClipboard(fullText, win, function() {
+                    if (copyMsg) {
+                        copyMsg.textContent = '✓ 全' + fullText.length + '文字をコピーしました';
+                        setTimeout(function() {
+                            if (!win.closed && copyMsg) copyMsg.textContent = '';
+                        }, 2000);
+                    }
+                });
+            });
+        }
+
+        function setOutputPage(newPage) {
+            const fullText = getFullOutputText();
+            const total = getOutputTotalPages(fullText);
+            outputPagination.totalPages = total;
+            outputPagination.currentPage = Math.max(1, Math.min(total, Math.trunc(Number(newPage) || 1)));
+            syncPopupOutput();
+        }
+
+        if (btnFirst) btnFirst.addEventListener('click', function() { setOutputPage(1); });
+        if (btnPrev) btnPrev.addEventListener('click', function() { setOutputPage(outputPagination.currentPage - 1); });
+        if (btnNext) btnNext.addEventListener('click', function() { setOutputPage(outputPagination.currentPage + 1); });
+        if (btnLast) btnLast.addEventListener('click', function() { setOutputPage(outputPagination.totalPages); });
+        if (pageInput) {
+            pageInput.addEventListener('change', function() {
+                setOutputPage(pageInput.value);
             });
         }
     }
@@ -250,12 +371,54 @@ function syncPopupInput() {
 function syncPopupOutput() {
     const win = popupWindows.output;
     if (!win || win.closed) return;
+
     const popupOut = win.document.getElementById('popup-output-area');
-    const mainOut = document.getElementById('output');
-    if (popupOut && mainOut) {
-        popupOut.innerHTML = mainOut.innerHTML;
-        popupOut.scrollTop = popupOut.scrollHeight;
+    const pageInput = win.document.getElementById('page-num-input');
+    const totalLabel = win.document.getElementById('page-total-label');
+    const charStats = win.document.getElementById('output-char-stats');
+    const btnFirst = win.document.getElementById('btn-page-first');
+    const btnPrev = win.document.getElementById('btn-page-prev');
+    const btnNext = win.document.getElementById('btn-page-next');
+    const btnLast = win.document.getElementById('btn-page-last');
+
+    const fullText = getFullOutputText();
+    const totalPages = getOutputTotalPages(fullText);
+    outputPagination.totalPages = totalPages;
+
+    if (outputPagination.currentPage > totalPages) {
+        outputPagination.currentPage = totalPages;
     }
+    if (outputPagination.currentPage < 1) {
+        outputPagination.currentPage = 1;
+    }
+
+    const curPage = outputPagination.currentPage;
+    const pageText = getOutputPageSlice(fullText, curPage);
+
+    if (popupOut) {
+        popupOut.textContent = pageText;
+    }
+    if (pageInput) {
+        pageInput.max = String(totalPages);
+        pageInput.value = String(curPage);
+    }
+    if (totalLabel) {
+        totalLabel.textContent = String(totalPages);
+    }
+    if (charStats) {
+        if (fullText.length === 0) {
+            charStats.textContent = '全 0 文字';
+        } else {
+            const startIdx = (curPage - 1) * OUTPUT_PAGE_SIZE + 1;
+            const endIdx = Math.min(fullText.length, curPage * OUTPUT_PAGE_SIZE);
+            charStats.textContent = '全 ' + fullText.length.toLocaleString() + ' 文字 (' + startIdx.toLocaleString() + '〜' + endIdx.toLocaleString() + '文字目を表示)';
+        }
+    }
+
+    if (btnFirst) btnFirst.disabled = (curPage <= 1);
+    if (btnPrev) btnPrev.disabled = (curPage <= 1);
+    if (btnNext) btnNext.disabled = (curPage >= totalPages);
+    if (btnLast) btnLast.disabled = (curPage >= totalPages);
 }
 
 function syncPopupMemory() {
