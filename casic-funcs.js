@@ -2,15 +2,6 @@
 // 組み込み関数 (1章〜9章) & 関数呼び出しディスパッチ
 // ==========================================
 
-// 新規追加された between / s_between を組み込み関数テーブルに登録
-if (typeof BUILTIN_FUNCTION_NAMES !== 'undefined') {
-    BUILTIN_FUNCTION_NAMES.add('between');
-    BUILTIN_FUNCTION_NAMES.add('s_between');
-}
-if (typeof FUNCTION_ALIASES !== 'undefined') {
-    FUNCTION_ALIASES['s_between'] = 'between';
-}
-
 function executeSqueezeFunction(args) {
     if (args.length < 2) return args[0] ? toDisplayString(args[0]) : "";
     const s1 = toDisplayString(args[0]);
@@ -54,11 +45,39 @@ function executeSqueezeFunction(args) {
     return out;
 }
 
-// 改訂仕様：between(s1, s2, s3, n) 関数ヘルパー
+// 7章: between_replace(s1, s2, s3, s4) 関数ヘルパー
+// 文字列s1の中で、s2とs3の間にある文字列をs4(初期値 "")に置き換えた文字列を返す。
+function executeBetweenReplaceFunction(args) {
+    if (args.length < 3) return args[0] ? toDisplayString(args[0]) : "";
+    const s1 = toDisplayString(args[0]);
+    const s2 = toDisplayString(args[1]);
+    const s3 = toDisplayString(args[2]);
+    const s4 = args.length >= 4 ? toDisplayString(args[3]) : "";
+
+    if (s2 === '' || s3 === '') return s1;
+
+    let out = '';
+    let pos = 0;
+    while (pos < s1.length) {
+        const openIdx = s1.indexOf(s2, pos);
+        if (openIdx === -1) {
+            out += s1.slice(pos);
+            break;
+        }
+        const closeIdx = s1.indexOf(s3, openIdx + s2.length);
+        if (closeIdx === -1) {
+            out += s1.slice(pos);
+            break;
+        }
+        out += s1.slice(pos, openIdx + s2.length) + s4 + s3;
+        pos = closeIdx + s3.length;
+    }
+    return out;
+}
+
+// 7章: between_list(s1, s2, s3, n) 関数ヘルパー
 // 文字列s1の中でs2とs3の間にある文字列を取り出し配列型で返す。
-// 入れ子の場合、n>0なら内側からn番目、n<0なら外側から|n|番目の深さの範囲を取り出し、
-// 対応が取れていない場合は多い側の最も外側のものを無視する。
-function executeBetweenFunction(args) {
+function executeBetweenListFunction(args) {
     if (args.length < 3) return [];
     const s1 = toDisplayString(args[0]);
     const s2 = toDisplayString(args[1]);
@@ -69,7 +88,6 @@ function executeBetweenFunction(args) {
 
     if (s2 === '' || s3 === '' || n === 0) return [];
 
-    // s2 と s3 が同じ文字列の場合（入れ子なし、先頭から2個ずつペアリングし余った末尾を無視）
     if (s2 === s3) {
         if (n !== 1 && n !== -1) return [];
         const positions = [];
@@ -89,7 +107,6 @@ function executeBetweenFunction(args) {
         return results;
     }
 
-    // s2 !== s3 の場合：スタックで括弧対応をとる（これにより多い側の最も外側のトークンが自動的に無視される）
     const openStack = [];
     const pairs = [];
     let i = 0;
@@ -99,7 +116,6 @@ function executeBetweenFunction(args) {
         const matchClose = s1.startsWith(s3, i);
 
         if (matchOpen && matchClose) {
-            // 万一 s2 と s3 の一方が他方の接頭辞だった場合は長い方を優先
             if (s2.length >= s3.length) {
                 openStack.push({ start: i, end: i + s2.length });
                 i += s2.length;
@@ -126,12 +142,10 @@ function executeBetweenFunction(args) {
 
     if (pairs.length === 0) return [];
 
-    // 開始位置の昇順（外側から内側の順）にソート
     pairs.sort(function(a, b) {
         return a.openStart - b.openStart;
     });
 
-    // 親子関係（包含関係）の構築
     for (let j = 0; j < pairs.length; j++) {
         const child = pairs[j];
         let bestParent = null;
@@ -148,13 +162,11 @@ function executeBetweenFunction(args) {
         }
     }
 
-    // 外側からの深さ (outerDepth: 根が1、子が親+1)
     for (let j = 0; j < pairs.length; j++) {
         const p = pairs[j];
         p.outerDepth = p.parent ? (p.parent.outerDepth + 1) : 1;
     }
 
-    // 内側からの深さ (innerDepth: 葉が1、親が max(子のinnerDepth)+1)
     function computeInnerDepth(node) {
         if (node.children.length === 0) {
             node.innerDepth = 1;
@@ -175,7 +187,6 @@ function executeBetweenFunction(args) {
         }
     }
 
-    // 条件に合う深さのペアから文字列を抽出
     const targetDepth = Math.abs(n);
     const outList = [];
     for (let j = 0; j < pairs.length; j++) {
@@ -187,6 +198,53 @@ function executeBetweenFunction(args) {
     }
 
     return outList;
+}
+
+// 7章: unescape(s, type) 関数ヘルパー
+// type: "all" (初期値), "unicode", "html", "url"（大文字小文字不問）
+function executeUnescapeFunction(args) {
+    if (args.length === 0) return "";
+    let result = toDisplayString(args[0]);
+    const type = args.length >= 2 ? cleanText(toDisplayString(args[1])).toLowerCase() : 'all';
+
+    if (type !== 'all' && type !== 'unicode' && type !== 'html' && type !== 'url') {
+        throw new Error('unescape関数の第2引数には "all", "unicode", "html", "url" のいずれかを指定してください');
+    }
+
+    // 1. Unicodeエスケープの復元 (\uXXXX および \u{XXXXX})
+    if (type === 'all' || type === 'unicode') {
+        result = result.replace(/\\u\{([0-9a-fA-F]+)\}/g, function(_, hex) {
+            const code = parseInt(hex, 16);
+            return Number.isFinite(code) ? String.fromCodePoint(code) : _;
+        });
+        result = result.replace(/\\u([0-9a-fA-F]{4})/g, function(_, hex) {
+            const code = parseInt(hex, 16);
+            return Number.isFinite(code) ? String.fromCharCode(code) : _;
+        });
+    }
+
+    // 2. HTMLエスケープの復元 (&apos;, &omega;, &#123;, &#x1F600; など)
+    if (type === 'all' || type === 'html') {
+        const decoder = document.createElement('textarea');
+        result = result.replace(/&(#?[a-zA-Z0-9]+);/g, function(fullMatch, entityBody) {
+            if (entityBody.toLowerCase() === 'apos') return "'";
+            decoder.innerHTML = fullMatch;
+            return decoder.value;
+        });
+    }
+
+    // 3. URLエスケープの復元 (%E3%81%82 など)
+    if (type === 'all' || type === 'url') {
+        result = result.replace(/(?:%[0-9a-fA-F]{2})+/g, function(encodedSeq) {
+            try {
+                return decodeURIComponent(encodedSeq);
+            } catch (e) {
+                return encodedSeq;
+            }
+        });
+    }
+
+    return result;
 }
 
 function executeAtFunction(argResults) {
@@ -375,6 +433,17 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         }
         throw new Error('base関数には2つまたは3つの引数が必要です');
     }
+    if (funcNameLower === 'clamp') {
+        if (args.length < 3) throw new Error('clamp関数には3つの引数 clamp(n1, n2, n3) が必要です');
+        const v1 = String(args[0]);
+        const v2 = String(args[1]);
+        const v3 = String(args[2]);
+        const lo = compareCasicNumericSort(v2, v3) <= 0 ? v2 : v3;
+        const hi = compareCasicNumericSort(v2, v3) <= 0 ? v3 : v2;
+        if (compareCasicNumericSort(v1, lo) < 0) return lo;
+        if (compareCasicNumericSort(v1, hi) > 0) return hi;
+        return v1;
+    }
 
     // 3. ビット演算の関数
     if (funcNameLower === 'band' || funcNameLower === 'bor' || funcNameLower === 'bxor') {
@@ -547,8 +616,36 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         return idx === -1 ? "0" : String(Array.from(str.slice(0, idx)).length + 1);
     }
     if (funcNameLower === 'count') {
-        if (args.length < 2) return "0";
+        if (args.length === 0) return {};
         const target = resolveArgAsCollectionOrValue(argResults[0]);
+
+        // 改訂仕様：引数が1つのとき、各文字または各要素の出現回数を集計した辞書を返す
+        if (args.length === 1) {
+            const freqDict = {};
+            if (Array.isArray(target)) {
+                for (let i = 0; i < target.length; i++) {
+                    const k = toDisplayString(target[i]);
+                    freqDict[k] = String((Number(freqDict[k] || 0)) + 1);
+                }
+                return freqDict;
+            }
+            if (isPlainDictObject(target)) {
+                const keys = Object.keys(target);
+                for (let i = 0; i < keys.length; i++) {
+                    const k = toDisplayString(target[keys[i]]);
+                    freqDict[k] = String((Number(freqDict[k] || 0)) + 1);
+                }
+                return freqDict;
+            }
+            const chars = Array.from(toDisplayString(target));
+            for (let i = 0; i < chars.length; i++) {
+                const ch = chars[i];
+                freqDict[ch] = String((Number(freqDict[ch] || 0)) + 1);
+            }
+            return freqDict;
+        }
+
+        // 引数が2つのとき：x中に出てくるsの数を返す
         const needle = args[1];
         if (Array.isArray(target)) {
             let c = 0;
@@ -634,8 +731,14 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
     if (funcNameLower === 'squeeze') {
         return executeSqueezeFunction(args);
     }
-    if (funcNameLower === 'between') {
-        return executeBetweenFunction(args);
+    if (funcNameLower === 'between_replace') {
+        return executeBetweenReplaceFunction(args);
+    }
+    if (funcNameLower === 'between_list') {
+        return executeBetweenListFunction(args);
+    }
+    if (funcNameLower === 'unescape') {
+        return executeUnescapeFunction(args);
     }
     if (funcNameLower === 'at') {
         return executeAtFunction(argResults);

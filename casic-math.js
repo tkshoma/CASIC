@@ -204,6 +204,10 @@ function parseCasicNumber(rawVal) {
     if (s === '' || s.toLowerCase() === 'false') {
         return { kind: 'int', rank: 1, num: 0, big: 0n, isValidNum: (s.toLowerCase() === 'false') };
     }
+    if (isInfinityString(s)) {
+        const isNeg = s.startsWith('-');
+        return { kind: 'float', rank: 3, num: isNeg ? -Infinity : Infinity, big: 0n, isValidNum: true };
+    }
     if (isBigIntString(s)) {
         const b = BigInt(s.slice(0, -1));
         return { kind: 'bigint', rank: 2, num: Number(b), big: b, isValidNum: true };
@@ -261,6 +265,7 @@ function bigIntLcm(a, b) {
 
 function applyRoundingFunction(mode, n1Val, n2Val) {
     const p1 = parseCasicNumber(n1Val);
+    if (!Number.isFinite(p1.num)) return formatFloatStorage(p1.num);
     const x = p1.num;
     const n2 = (n2Val === undefined || n2Val === null || cleanText(n2Val) === '')
         ? 0
@@ -359,8 +364,9 @@ function applyNumericBinaryOp(leftStr, rightStr, op) {
             return (L.big / R.big).toString() + 'n';
         }
         if (R.num === 0) throw new Error('0による除算です');
-        const truncated = Math.trunc(L.num / R.num);
-        return String(truncated);
+        const q = L.num / R.num;
+        if (!Number.isFinite(q)) return formatFloatStorage(q);
+        return String(Math.trunc(q));
     }
 
     if (maxRank === 3) {

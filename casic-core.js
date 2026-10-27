@@ -113,8 +113,17 @@ function isFloatString(str) {
     return dotCount === 1 && digitCount >= 1;
 }
 
+// 改訂仕様："inf", "-inf", "∞", "-∞" を数値として判定
+function isInfinityString(str) {
+    if (!str) return false;
+    const lower = cleanText(str).toLowerCase();
+    return lower === 'inf' || lower === '+inf' || lower === '-inf' ||
+           lower === '∞' || lower === '+∞' || lower === '-∞' ||
+           lower === 'infinity' || lower === '+infinity' || lower === '-infinity';
+}
+
 function isNumericLiteralString(str) {
-    return isIntString(str) || isBigIntString(str) || isFloatString(str);
+    return isIntString(str) || isBigIntString(str) || isFloatString(str) || isInfinityString(str);
 }
 
 function cleanText(str) {
@@ -214,6 +223,7 @@ const FUNCTION_ALIASES = {
     'c_gcd': 'gcd',
     'c_lcm': 'lcm',
     'c_base': 'base',
+    'c_clamp': 'clamp',
     'b_and': 'band',
     'b_or': 'bor',
     'b_xor': 'bxor',
@@ -249,6 +259,11 @@ const FUNCTION_ALIASES = {
     's_regex': 'regex',
     's_if': 'if',
     's_squeeze': 'squeeze',
+    's_between_replace': 'between_replace',
+    's_between_list': 'between_list',
+    'between': 'between_list',
+    's_between': 'between_list',
+    's_unescape': 'unescape',
     's_at': 'at',
     'l_at': 'at',
     'd_at': 'at',
@@ -295,7 +310,8 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'check', 'charcheck', 'checkchar', 'allcheck', 'checkall',
     'abs', 'c_abs', 'not', 'c_not', 'sqrt', 'c_sqrt',
     'round', 'c_round', 'floor', 'c_floor', 'ceil', 'celi', 'c_ceil', 'trunc', 'c_trunc',
-    'min', 'c_min', 'max', 'c_max', 'sum', 'c_sum', 'gcd', 'c_gcd', 'lcm', 'c_lcm', 'base', 'c_base',
+    'min', 'c_min', 'max', 'c_max', 'sum', 'c_sum', 'gcd', 'c_gcd', 'lcm', 'c_lcm',
+    'base', 'c_base', 'clamp', 'c_clamp',
     'band', 'b_and', 'bor', 'b_or', 'bxor', 'b_xor', 'bnot', 'b_not',
     'rand', 'rand.', 'hrand', 'randh', 'hrand.', 'randh.',
     'hash', 'h_hash', 'md5', 'h_md5', 'sha256', 'h_sha256',
@@ -306,7 +322,11 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'find', 's_find', 'l_find', 'count', 's_count', 'l_count', 'replace', 's_replace', 'l_replace',
     'split', 's_split', 'rep', 's_rep', 'trim', 's_trim',
     'upper', 's_upper', 'lower', 's_lower', 'regex', 's_regex', 'if', 's_if',
-    'squeeze', 's_squeeze', 'at', 's_at', 'l_at', 'd_at',
+    'squeeze', 's_squeeze',
+    'between_replace', 's_between_replace',
+    'between_list', 's_between_list', 'between', 's_between',
+    'unescape', 's_unescape',
+    'at', 's_at', 'l_at', 'd_at',
     'join', 'l_join', 'grid', 'l_grid', 'flat', 'l_flat', 'bs', 'l_bs', 'uniq', 'l_uniq',
     'has', 'd_has', 'keys', 'key', 'd_keys', 'd_key', 'json', 'd_json',
     'g_shape', 'd_g_shape', 'g_image', 'd_g_image', 'g_text', 'd_g_text',
@@ -461,6 +481,8 @@ function setDict(name, dictObj) {
 }
 
 function formatFloatStorage(num) {
+    if (num === Infinity) return 'inf';
+    if (num === -Infinity) return '-inf';
     if (!Number.isFinite(num)) return String(num);
     if (Math.floor(num) === num) {
         return String(num) + '.0';
@@ -481,7 +503,7 @@ function formatDictAsJsonString(dictObj) {
             valStr = formatDictAsJsonString(val);
         } else {
             const s = String(val);
-            if (isNumericLiteralString(s)) {
+            if (isNumericLiteralString(s) && !isInfinityString(s)) {
                 valStr = toDisplayString(s);
             } else {
                 valStr = '"' + s.split('"').join(CHAR_BSLASH + '"') + '"';
@@ -516,7 +538,7 @@ function formatArrayAsCasicString(arr) {
     if (!Array.isArray(arr)) {
         if (isPlainDictObject(arr)) return formatDictAsJsonString(arr);
         const s = toDisplayString(arr);
-        if (isNumericLiteralString(s)) return s;
+        if (isNumericLiteralString(s) && !isInfinityString(s)) return s;
         return '"' + s.split('"').join(CHAR_BSLASH + '"') + '"';
     }
     const parts = arr.map(function(el) {
@@ -527,7 +549,7 @@ function formatArrayAsCasicString(arr) {
             return formatDictAsJsonString(el);
         }
         const s = String(el);
-        if (isNumericLiteralString(s)) {
+        if (isNumericLiteralString(s) && !isInfinityString(s)) {
             return toDisplayString(s);
         }
         return '"' + s.split('"').join(CHAR_BSLASH + '"') + '"';
