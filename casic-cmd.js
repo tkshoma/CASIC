@@ -403,7 +403,6 @@ function tryExecuteVariableAssignment(trimmed) {
 // 3. 配列・変数・辞書の操作命令 (4章・5章・7章)
 // ==========================================
 
-// 改訂仕様：sort(n) a1[], a2[], ... の複数配列連動ソートにも対応
 function executeSortOrRevCommand(cmdLower, restRaw) {
     const parsed = parseCommandOptionAndTarget(restRaw);
     const targetArgs = splitCommandTargetArgs(parsed.targetStr);
@@ -432,7 +431,6 @@ function executeSortOrRevCommand(cmdLower, restRaw) {
         nLimit = Math.max(0, Math.trunc(parseCasicNumber(evaluateExpression(parsed.optStr)).num));
     }
 
-    // 複数配列が指定された場合：配列 a1 をソートし、その動きに連動させて a2, a3... も並び替える
     if (targetArgs.length >= 2) {
         const primaryName = cleanText(targetArgs[0]);
         const primaryArr = cloneArrayDeep(getArray(primaryName));
@@ -461,7 +459,6 @@ function executeSortOrRevCommand(cmdLower, restRaw) {
         return;
     }
 
-    // 引数が1つの場合
     const isArrayTarget = firstTarget.endsWith('[]') || (hasArray(firstTarget) && !Object.prototype.hasOwnProperty.call(state.vars, firstTarget.toLowerCase()));
 
     if (isArrayTarget) {
@@ -1165,7 +1162,7 @@ function executeStatement(stmtRaw, lineNum) {
         const rest = trimmed.slice(cmdLen);
         const restTrimmed = cleanText(rest);
 
-        // コマンドライン専用命令 (cont, run, goto, step)
+        // コマンドライン専用命令 (cont, run, goto, step, reset)
         if (cmdLower === 'cont' && (rest === '' || isSpaceChar(rest[0]))) {
             return executeCmdlineCont(restTrimmed);
         }
@@ -1177,6 +1174,15 @@ function executeStatement(stmtRaw, lineNum) {
         }
         if (cmdLower === 'step' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(')) {
             return executeCmdlineStep(restTrimmed);
+        }
+        if (cmdLower === 'reset' && (rest === '' || isSpaceChar(rest[0]))) {
+            if (restTrimmed !== '') {
+                return { output: '', error: 'reset命令に引数は指定できません', action: null };
+            }
+            if (typeof resetEngine === 'function') {
+                resetEngine();
+            }
+            return { output: '', error: null, action: null };
         }
 
         // stop / js / wait / return

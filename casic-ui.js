@@ -10,8 +10,62 @@ const bracketColors = [
     '#ffffff'  // 8重: 真っ白
 ];
 
-// メイン画面の出力欄が巨大文字列でフリーズしないための表示上限
 const MAIN_OUTPUT_DISPLAY_LIMIT = 20000;
+let currentActiveTab = 'code';
+
+const editorUpdateCallbacks = {};
+
+// ==========================================
+// 0. 仮想タブ切り替え制御 ＆ Code全画面表示切替
+// ==========================================
+
+function switchVirtualTab(tabName) {
+    const validTabs = ['code', 'func', 'import', 'settings'];
+    if (validTabs.indexOf(tabName) === -1) return;
+
+    currentActiveTab = tabName;
+
+    for (let i = 0; i < validTabs.length; i++) {
+        const t = validTabs[i];
+        const pane = document.getElementById('tab-pane-' + t);
+        const btn = document.getElementById('tab-btn-' + t);
+        if (pane) {
+            if (t === tabName) pane.classList.remove('hidden');
+            else pane.classList.add('hidden');
+        }
+        if (btn) {
+            if (t === tabName) btn.classList.add('active');
+            else btn.classList.remove('active');
+        }
+    }
+
+    if (tabName === 'code') {
+        syncMainFunctions();
+        if (editorUpdateCallbacks['code']) editorUpdateCallbacks['code']();
+    } else if (tabName === 'func') {
+        if (editorUpdateCallbacks['func-code']) editorUpdateCallbacks['func-code']();
+    } else if (tabName === 'import' && typeof renderAllAssetLists === 'function') {
+        renderAllAssetLists();
+    } else if (tabName === 'settings') {
+        syncSettingsModalInputs();
+    }
+}
+
+function toggleCodeFullscreen() {
+    const codeCol = document.getElementById('code-column');
+    const btn = document.getElementById('btn-code-fullscreen');
+    if (!codeCol) return;
+
+    const isFull = codeCol.classList.toggle('code-fullscreen');
+    if (btn) {
+        btn.textContent = isFull ? '全画面解除' : '全画面';
+        btn.style.backgroundColor = isFull ? '#007acc' : '';
+        btn.style.color = isFull ? '#ffffff' : '';
+    }
+    if (editorUpdateCallbacks['code']) {
+        editorUpdateCallbacks['code']();
+    }
+}
 
 // ==========================================
 // 1. エディタ設定 & localStorage 保存・復元
@@ -19,6 +73,7 @@ const MAIN_OUTPUT_DISPLAY_LIMIT = 20000;
 const SETTINGS_STORAGE_KEY = 'casic_editor_settings_v1';
 
 const editorSettings = {
+    editorFontSize: 18,
     tabSpaces: 4,
     autoIndent: true,
     autoCloseParen: true,
@@ -26,30 +81,73 @@ const editorSettings = {
     autoCloseQuote: true
 };
 
+function applyEditorCssVars() {
+    const spaces = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
+    const fontSize = Math.max(10, Math.min(48, Number(editorSettings.editorFontSize) || 18));
+
+    document.documentElement.style.setProperty('--tab-size', String(spaces));
+    document.documentElement.style.setProperty('--editor-font-size', fontSize + 'px');
+
+    const codeLabel = document.getElementById('code-font-size-label');
+    const funcLabel = document.getElementById('func-font-size-label');
+    const settingFontInput = document.getElementById('setting-editor-font-size');
+    if (codeLabel) codeLabel.textContent = fontSize + 'px';
+    if (funcLabel) funcLabel.textContent = fontSize + 'px';
+    if (settingFontInput) settingFontInput.value = String(fontSize);
+
+    if (typeof popupWindows !== 'undefined') {
+        Object.keys(popupWindows).forEach(function(k) {
+            const w = popupWindows[k];
+            if (w && !w.closed && w.document && w.document.documentElement) {
+                w.document.documentElement.style.setProperty('--tab-size', String(spaces));
+            }
+        });
+    }
+
+    Object.keys(editorUpdateCallbacks).forEach(function(id) {
+        editorUpdateCallbacks[id]();
+    });
+}
+
+function setEditorFontSize(newSize) {
+    const clamped = Math.max(10, Math.min(48, Math.trunc(Number(newSize) || 18)));
+    editorSettings.editorFontSize = clamped;
+    saveEditorSettings();
+}
+
+function changeEditorFontSize(delta) {
+    setEditorFontSize((Number(editorSettings.editorFontSize) || 18) + delta);
+}
+
 function loadEditorSettings() {
     try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-            if (typeof parsed.tabSpaces === 'number' && parsed.tabSpaces >= 1 && parsed.tabSpaces <= 16) {
-                editorSettings.tabSpaces = Math.trunc(parsed.tabSpaces);
-            }
-            if (typeof parsed.autoIndent === 'boolean') {
-                editorSettings.autoIndent = parsed.autoIndent;
-            }
-            if (typeof parsed.autoCloseParen === 'boolean') {
-                editorSettings.autoCloseParen = parsed.autoCloseParen;
-            }
-            if (typeof parsed.autoCloseBracket === 'boolean') {
-                editorSettings.autoCloseBracket = parsed.autoCloseBracket;
-            }
-            if (typeof parsed.autoCloseQuote === 'boolean') {
-                editorSettings.autoCloseQuote = parsed.autoCloseQuote;
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                if (typeof parsed.editorFontSize === 'number' && parsed.editorFontSize >= 10 && parsed.editorFontSize <= 48) {
+                    editorSettings.editorFontSize = Math.trunc(parsed.editorFontSize);
+                }
+                if (typeof parsed.tabSpaces === 'number' && parsed.tabSpaces >= 1 && parsed.tabSpaces <= 16) {
+                    editorSettings.tabSpaces = Math.trunc(parsed.tabSpaces);
+                }
+                if (typeof parsed.autoIndent === 'boolean') {
+                    editorSettings.autoIndent = parsed.autoIndent;
+                }
+                if (typeof parsed.autoCloseParen === 'boolean') {
+                    editorSettings.autoCloseParen = parsed.autoCloseParen;
+                }
+                if (typeof parsed.autoCloseBracket === 'boolean') {
+                    editorSettings.autoCloseBracket = parsed.autoCloseBracket;
+                }
+                if (typeof parsed.autoCloseQuote === 'boolean') {
+                    editorSettings.autoCloseQuote = parsed.autoCloseQuote;
+                }
             }
         }
     } catch (e) {
     }
+    applyEditorCssVars();
 }
 
 function saveEditorSettings() {
@@ -57,29 +155,18 @@ function saveEditorSettings() {
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(editorSettings));
     } catch (e) {
     }
-}
-
-function ensureBracketSettingItemExists() {
-    if (document.getElementById('setting-auto-bracket')) return;
-    const parenChk = document.getElementById('setting-auto-paren');
-    if (!parenChk || !parenChk.parentElement || !parenChk.parentElement.parentElement) return;
-    const modalBody = parenChk.parentElement.parentElement;
-    const itemDiv = document.createElement('div');
-    itemDiv.className = 'setting-item';
-    itemDiv.innerHTML =
-        '<label for="setting-auto-bracket">「[」入力時の自動閉じ括弧「]」</label>' +
-        '<input type="checkbox" id="setting-auto-bracket" checked>';
-    modalBody.insertBefore(itemDiv, parenChk.parentElement.nextSibling);
+    applyEditorCssVars();
 }
 
 function syncSettingsModalInputs() {
-    ensureBracketSettingItemExists();
+    const fontInput = document.getElementById('setting-editor-font-size');
     const tabInput = document.getElementById('setting-tab-spaces');
     const indentChk = document.getElementById('setting-auto-indent');
     const parenChk = document.getElementById('setting-auto-paren');
     const bracketChk = document.getElementById('setting-auto-bracket');
     const quoteChk = document.getElementById('setting-auto-quote');
 
+    if (fontInput) fontInput.value = String(editorSettings.editorFontSize);
     if (tabInput) tabInput.value = String(editorSettings.tabSpaces);
     if (indentChk) indentChk.checked = editorSettings.autoIndent;
     if (parenChk) parenChk.checked = editorSettings.autoCloseParen;
@@ -88,13 +175,21 @@ function syncSettingsModalInputs() {
 }
 
 function initSettingsModalEvents() {
-    ensureBracketSettingItemExists();
+    const fontInput = document.getElementById('setting-editor-font-size');
     const tabInput = document.getElementById('setting-tab-spaces');
     const indentChk = document.getElementById('setting-auto-indent');
     const parenChk = document.getElementById('setting-auto-paren');
     const bracketChk = document.getElementById('setting-auto-bracket');
     const quoteChk = document.getElementById('setting-auto-quote');
 
+    if (fontInput) {
+        fontInput.addEventListener('change', function() {
+            const val = Math.max(10, Math.min(48, Math.trunc(Number(fontInput.value) || 18)));
+            editorSettings.editorFontSize = val;
+            fontInput.value = String(val);
+            saveEditorSettings();
+        });
+    }
     if (tabInput) {
         tabInput.addEventListener('change', function() {
             const val = Math.max(1, Math.min(16, Math.trunc(Number(tabInput.value) || 4)));
@@ -130,20 +225,233 @@ function initSettingsModalEvents() {
 }
 
 function openSettingsModal() {
-    syncSettingsModalInputs();
-    const modal = document.getElementById('settings-modal');
-    if (modal) modal.classList.remove('hidden');
+    switchVirtualTab('settings');
 }
 
 function closeSettingsModal() {
-    const modal = document.getElementById('settings-modal');
-    if (modal) modal.classList.add('hidden');
+    switchVirtualTab('code');
 }
 
-function handleModalOverlayClick(e) {
-    if (e.target && e.target.id === 'settings-modal') {
-        closeSettingsModal();
+function openImportModal() {
+    switchVirtualTab('import');
+}
+
+function closeImportModal() {
+    if (typeof previewAudioElement !== 'undefined' && previewAudioElement) {
+        previewAudioElement.pause();
+        previewAudioElement = null;
     }
+    switchVirtualTab('code');
+}
+
+// ==========================================
+// 1.5 検索・置換バー ＆ 同一文字列ハイライト機能
+// ==========================================
+
+function toggleReplaceBar(editorId) {
+    const bar = document.getElementById(editorId + '-replace-bar');
+    if (!bar) return;
+    const isHidden = bar.classList.contains('hidden');
+    if (isHidden) {
+        openReplaceBar(editorId);
+    } else {
+        closeReplaceBar(editorId);
+    }
+}
+
+function openReplaceBar(editorId) {
+    const bar = document.getElementById(editorId + '-replace-bar');
+    const findInput = document.getElementById(editorId + '-find-input');
+    const textarea = document.getElementById(editorId);
+    if (!bar || !findInput || !textarea) return;
+
+    bar.classList.remove('hidden');
+
+    if (textarea.selectionStart !== textarea.selectionEnd) {
+        const sel = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
+        if (sel.indexOf('\n') === -1 && sel.length > 0) {
+            findInput.value = sel;
+        }
+    }
+
+    onFindInputChanged(editorId);
+    findInput.focus();
+    findInput.select();
+}
+
+function closeReplaceBar(editorId) {
+    const bar = document.getElementById(editorId + '-replace-bar');
+    if (bar) bar.classList.add('hidden');
+    if (editorUpdateCallbacks[editorId]) editorUpdateCallbacks[editorId]();
+    const textarea = document.getElementById(editorId);
+    if (textarea) textarea.focus();
+}
+
+function countOccurrencesInText(text, target) {
+    if (!target || target.length === 0) return 0;
+    let count = 0;
+    let pos = 0;
+    while (pos <= text.length - target.length) {
+        const idx = text.indexOf(target, pos);
+        if (idx === -1) break;
+        count++;
+        pos = idx + target.length;
+    }
+    return count;
+}
+
+function onFindInputChanged(editorId) {
+    const textarea = document.getElementById(editorId);
+    const findInput = document.getElementById(editorId + '-find-input');
+    const countBadge = document.getElementById(editorId + '-find-count');
+    if (!textarea || !findInput) return;
+
+    const needle = findInput.value;
+    const count = countOccurrencesInText(textarea.value, needle);
+    if (countBadge) {
+        countBadge.textContent = count + '件';
+    }
+    if (editorUpdateCallbacks[editorId]) {
+        editorUpdateCallbacks[editorId]();
+    }
+}
+
+function findNextMatch(editorId) {
+    const textarea = document.getElementById(editorId);
+    const findInput = document.getElementById(editorId + '-find-input');
+    if (!textarea || !findInput) return;
+
+    const needle = findInput.value;
+    if (!needle) return;
+
+    const text = textarea.value;
+    const searchFrom = textarea.selectionEnd;
+    let idx = text.indexOf(needle, searchFrom);
+    if (idx === -1) {
+        idx = text.indexOf(needle, 0);
+    }
+    if (idx === -1) return;
+
+    textarea.focus();
+    textarea.selectionStart = idx;
+    textarea.selectionEnd = idx + needle.length;
+    if (editorUpdateCallbacks[editorId]) editorUpdateCallbacks[editorId]();
+    scrollCaretIntoView(textarea);
+}
+
+function replaceSingleMatch(editorId) {
+    const textarea = document.getElementById(editorId);
+    const findInput = document.getElementById(editorId + '-find-input');
+    const replaceInput = document.getElementById(editorId + '-replace-input');
+    if (!textarea || !findInput || !replaceInput) return;
+
+    const needle = findInput.value;
+    if (!needle) return;
+    const replacement = replaceInput.value;
+    const text = textarea.value;
+
+    let targetStart = -1;
+    if (textarea.selectionStart !== textarea.selectionEnd &&
+        text.slice(textarea.selectionStart, textarea.selectionEnd) === needle) {
+        targetStart = textarea.selectionStart;
+    } else {
+        targetStart = text.indexOf(needle, textarea.selectionEnd);
+        if (targetStart === -1) {
+            targetStart = text.indexOf(needle, 0);
+        }
+    }
+
+    if (targetStart === -1) return;
+
+    textarea.value = text.slice(0, targetStart) + replacement + text.slice(targetStart + needle.length);
+    const afterReplacePos = targetStart + replacement.length;
+
+    const nextIdx = textarea.value.indexOf(needle, afterReplacePos);
+    textarea.focus();
+    if (nextIdx !== -1) {
+        textarea.selectionStart = nextIdx;
+        textarea.selectionEnd = nextIdx + needle.length;
+    } else {
+        textarea.selectionStart = textarea.selectionEnd = afterReplacePos;
+    }
+
+    onFindInputChanged(editorId);
+    if (editorId === 'func-code') syncMainFunctions();
+    if (editorId === 'code' && typeof syncPopupCode === 'function') syncPopupCode();
+    scrollCaretIntoView(textarea);
+}
+
+function replaceAllMatches(editorId) {
+    const textarea = document.getElementById(editorId);
+    const findInput = document.getElementById(editorId + '-find-input');
+    const replaceInput = document.getElementById(editorId + '-replace-input');
+    if (!textarea || !findInput || !replaceInput) return;
+
+    const needle = findInput.value;
+    if (!needle) return;
+    const replacement = replaceInput.value;
+    const text = textarea.value;
+
+    if (text.indexOf(needle) === -1) return;
+
+    textarea.value = text.split(needle).join(replacement);
+    onFindInputChanged(editorId);
+    if (editorId === 'func-code') syncMainFunctions();
+    if (editorId === 'code' && typeof syncPopupCode === 'function') syncPopupCode();
+    scrollCaretIntoView(textarea);
+}
+
+function handleReplaceBarKeyDown(e, editorId, mode) {
+    if (e.isComposing) return;
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        if (mode === 'find') {
+            findNextMatch(editorId);
+        } else {
+            replaceSingleMatch(editorId);
+        }
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeReplaceBar(editorId);
+    }
+}
+
+function buildSelectionMatchHighlightHtml(text, targetStr) {
+    if (!targetStr || targetStr.length === 0 || targetStr.indexOf('\n') !== -1) {
+        return '';
+    }
+    let result = '';
+    let pos = 0;
+    const tLen = targetStr.length;
+
+    while (pos < text.length) {
+        const idx = text.indexOf(targetStr, pos);
+        if (idx === -1) {
+            result += escapeHtml(text.slice(pos));
+            break;
+        }
+        result += escapeHtml(text.slice(pos, idx));
+        result += '<span class="selection-match-highlight">' + escapeHtml(text.slice(idx, idx + tLen)) + '</span>';
+        pos = idx + tLen;
+    }
+    if (text.endsWith('\n')) result += ' ';
+    return result;
+}
+
+function getActiveHighlightQueryForEditor(textarea) {
+    if (!textarea) return '';
+    if (textarea.selectionStart !== textarea.selectionEnd) {
+        const sel = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
+        if (sel.indexOf('\n') === -1 && cleanText(sel) !== '') {
+            return sel;
+        }
+    }
+    const bar = document.getElementById(textarea.id + '-replace-bar');
+    const findInput = document.getElementById(textarea.id + '-find-input');
+    if (bar && !bar.classList.contains('hidden') && findInput && findInput.value !== '') {
+        return findInput.value;
+    }
+    return '';
 }
 
 // ==========================================
@@ -161,19 +469,12 @@ const suggestState = {
     selectedIndex: -1
 };
 
-function getOrCreateSuggestBar() {
-    let bar = document.getElementById('suggest-bar');
-    if (!bar) {
-        const codeContainer = document.getElementById('code-container');
-        if (codeContainer && codeContainer.parentElement) {
-            bar = document.createElement('div');
-            bar.id = 'suggest-bar';
-            bar.className = 'suggest-bar';
-            bar.innerHTML = '<span class="suggest-placeholder">予測変換: 文字を入力すると候補が表示されます (Tabで選択 / Tab+数字で直接指定)</span>';
-            codeContainer.parentElement.insertBefore(bar, codeContainer.nextSibling);
-        }
+function getTargetSuggestBar() {
+    if (suggestState.activeEditor && suggestState.activeEditor.id === 'func-code') {
+        const funcBar = document.getElementById('func-suggest-bar');
+        if (funcBar) return funcBar;
     }
-    return bar;
+    return document.getElementById('suggest-bar');
 }
 
 function resetSuggestCycle() {
@@ -291,7 +592,7 @@ function collectCodeSymbols() {
         Object.keys(state.dicts).forEach(function(k) { varMap.set(k.toLowerCase() + '{}', k + '{}'); });
         Object.keys(state.functions).forEach(function(k) { funcSet.add(k.toLowerCase()); });
 
-        const editorIds = ['code', 'sub-code1', 'sub-code2'];
+        const editorIds = ['func-code', 'code', 'sub-code1', 'sub-code2'];
         for (let eIdx = 0; eIdx < editorIds.length; eIdx++) {
             const el = document.getElementById(editorIds[eIdx]);
             if (!el) continue;
@@ -489,7 +790,7 @@ function buildSuggestionsList(prefix, contextType) {
 }
 
 function renderSuggestBar() {
-    const bar = getOrCreateSuggestBar();
+    const bar = getTargetSuggestBar();
     if (!bar) return;
 
     const list = suggestState.candidates;
@@ -504,7 +805,6 @@ function renderSuggestBar() {
         const item = list[i];
         const isSel = (i === suggestState.selectedIndex);
         html += '<div class="suggest-item ' + item.colorClass + (isSel ? ' selected' : '') + '" ' +
-                'id="suggest-item-' + i + '" ' +
                 'onmousedown="handleSuggestItemMouseDown(event, ' + i + ')">' +
                 '<span class="suggest-idx">[' + (i + 1) + ']</span>' +
                 '<span>' + escapeHtml(item.display) + '</span>' +
@@ -513,7 +813,8 @@ function renderSuggestBar() {
     bar.innerHTML = html;
 
     if (suggestState.selectedIndex >= 0 && suggestState.selectedIndex < maxDisplay) {
-        const selEl = document.getElementById('suggest-item-' + suggestState.selectedIndex);
+        const items = bar.querySelectorAll('.suggest-item');
+        const selEl = items[suggestState.selectedIndex];
         if (selEl) {
             selEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         }
@@ -524,7 +825,7 @@ function updateSuggestionsForEditor(textarea) {
     if (!textarea || suggestState.isCycling) return;
 
     suggestState.activeEditor = textarea;
-    const bar = getOrCreateSuggestBar();
+    const bar = getTargetSuggestBar();
     const ctx = analyzeCursorSuggestContext(textarea.value, textarea.selectionStart);
 
     if (!ctx.hasTextBeforeCursor || ctx.inStringOrComment) {
@@ -566,6 +867,10 @@ function applySuggestionByIndex(textarea, index, updateEditorCallback) {
         }
     }
 
+    const editorBody = textarea.parentElement;
+    const savedScrollTop = editorBody ? editorBody.scrollTop : 0;
+    const savedScrollLeft = editorBody ? editorBody.scrollLeft : 0;
+
     textarea.value = val.slice(0, start) + insertStr + afterText;
     const newEnd = start + insertStr.length;
 
@@ -582,6 +887,14 @@ function applySuggestionByIndex(textarea, index, updateEditorCallback) {
     if (typeof updateEditorCallback === 'function') {
         updateEditorCallback();
     }
+    if (editorBody) {
+        editorBody.scrollTop = savedScrollTop;
+        editorBody.scrollLeft = savedScrollLeft;
+    }
+    if (textarea.id === 'code' && typeof syncPopupCode === 'function') {
+        syncPopupCode();
+    }
+    scrollCaretIntoView(textarea);
     renderSuggestBar();
     return true;
 }
@@ -591,18 +904,11 @@ function handleSuggestItemMouseDown(e, index) {
     const textarea = suggestState.activeEditor || document.getElementById('code');
     if (!textarea) return;
     textarea.focus();
-    applySuggestionByIndex(textarea, index, function() {
-        const highlightDiv = document.getElementById(textarea.id + '-highlight');
-        if (highlightDiv) highlightDiv.innerHTML = highlightCasic(textarea.value, textarea.selectionStart);
-        if (textarea.id === 'code') {
-            updateLineNumbers();
-            updateCodeStats();
-        }
-    });
+    applySuggestionByIndex(textarea, index, editorUpdateCallbacks[textarea.id]);
 }
 
 // ==========================================
-// 3. シンタックスハイライト・エディタ制御
+// 3. シンタックスハイライト・サイズ同期・オートスクロール制御
 // ==========================================
 
 function escapeHtml(str) {
@@ -842,9 +1148,76 @@ function highlightCasic(text, cursorPos = -1) {
     return html;
 }
 
+function syncEditorDimensions(textarea, highlightDiv, matchDiv, gutter, allowScrollBeyondLastLine) {
+    const editorBody = textarea.parentElement;
+    if (!editorBody) return;
+
+    const computed = window.getComputedStyle(textarea);
+    const lineHeight = parseFloat(computed.lineHeight) || 27;
+    const padTop = parseFloat(computed.paddingTop) || 15;
+    const padBottom = parseFloat(computed.paddingBottom) || 15;
+
+    const lineCount = textarea.value.split('\n').length;
+    const viewHeight = editorBody.clientHeight || 300;
+
+    const extraBottom = allowScrollBeyondLastLine ? Math.max(0, viewHeight - lineHeight - padTop) : 0;
+    const totalHeight = Math.max(viewHeight, Math.ceil(lineCount * lineHeight + padTop + padBottom + extraBottom));
+
+    highlightDiv.style.width = 'auto';
+    const contentWidth = Math.max(editorBody.clientWidth || 0, highlightDiv.scrollWidth);
+
+    textarea.style.height = totalHeight + 'px';
+    highlightDiv.style.height = totalHeight + 'px';
+    if (matchDiv) matchDiv.style.height = totalHeight + 'px';
+
+    textarea.style.width = contentWidth + 'px';
+    highlightDiv.style.width = contentWidth + 'px';
+    if (matchDiv) matchDiv.style.width = contentWidth + 'px';
+
+    if (gutter) {
+        gutter.style.paddingBottom = (padBottom + extraBottom) + 'px';
+        gutter.scrollTop = editorBody.scrollTop;
+    }
+}
+
+function scrollCaretIntoView(textarea) {
+    const editorBody = textarea.parentElement;
+    if (!editorBody) return;
+
+    const computed = window.getComputedStyle(textarea);
+    const lineHeight = parseFloat(computed.lineHeight) || 27;
+    const padTop = parseFloat(computed.paddingTop) || 15;
+
+    const pos = textarea.selectionEnd;
+    const textBefore = textarea.value.slice(0, pos);
+    const linesBefore = textBefore.split('\n');
+    const lineIdx = linesBefore.length - 1;
+
+    const caretTop = padTop + lineIdx * lineHeight;
+    const caretBottom = caretTop + lineHeight;
+
+    const viewTop = editorBody.scrollTop;
+    const viewHeight = editorBody.clientHeight;
+    const viewBottom = viewTop + viewHeight;
+
+    if (caretTop < viewTop + padTop) {
+        editorBody.scrollTop = Math.max(0, caretTop - padTop);
+    } else if (caretBottom > viewBottom - padTop) {
+        editorBody.scrollTop = Math.max(0, caretBottom - viewHeight + padTop);
+    }
+
+    const gutter = (textarea.id === 'code')
+        ? document.getElementById('line-numbers')
+        : (textarea.id === 'func-code' ? document.getElementById('func-line-numbers') : null);
+    if (gutter) {
+        gutter.scrollTop = editorBody.scrollTop;
+    }
+}
+
 function updateLineNumbers() {
     const textarea = document.getElementById('code');
     const gutter = document.getElementById('line-numbers');
+    if (!textarea || !gutter) return;
     const lineCount = textarea.value.split('\n').length;
     let html = '';
     for (let i = 1; i <= lineCount; i++) {
@@ -857,6 +1230,27 @@ function updateLineNumbers() {
 function updateCodeStats() {
     const textarea = document.getElementById('code');
     const stats = document.getElementById('code-stats');
+    if (textarea && stats) {
+        const lines = textarea.value.split('\n').length;
+        stats.innerText = 'Lines: ' + lines + ' | Length: ' + textarea.value.length + ' | Pos: ' + textarea.selectionStart;
+    }
+}
+
+function updateFuncLineNumbers() {
+    const textarea = document.getElementById('func-code');
+    const gutter = document.getElementById('func-line-numbers');
+    if (!textarea || !gutter) return;
+    const lineCount = textarea.value.split('\n').length;
+    let html = '';
+    for (let i = 1; i <= lineCount; i++) {
+        html += '<div class="line-num">' + i + '</div>';
+    }
+    gutter.innerHTML = html;
+}
+
+function updateFuncCodeStats() {
+    const textarea = document.getElementById('func-code');
+    const stats = document.getElementById('func-code-stats');
     if (textarea && stats) {
         const lines = textarea.value.split('\n').length;
         stats.innerText = 'Lines: ' + lines + ' | Length: ' + textarea.value.length + ' | Pos: ' + textarea.selectionStart;
@@ -877,26 +1271,57 @@ function shouldAddExtraBlockIndent(lineBeforeCursor, lineAfterCursor) {
     return false;
 }
 
-function setupEditor(id, isMain = false) {
+function setupEditor(id, isMain = false, isFuncEditor = false) {
     const textarea = document.getElementById(id);
     const highlightDiv = document.getElementById(id + '-highlight');
-    const gutter = isMain ? document.getElementById('line-numbers') : null;
+    const matchDiv = document.getElementById(id + '-match-highlight');
+    const gutter = isMain ? document.getElementById('line-numbers') : (isFuncEditor ? document.getElementById('func-line-numbers') : null);
+    const editorBody = textarea ? textarea.parentElement : null;
+    const allowScrollBeyond = (isMain || isFuncEditor);
 
-    if (isMain) {
-        getOrCreateSuggestBar();
-    }
+    if (!textarea || !highlightDiv || !editorBody) return;
 
     const update = function() {
         highlightDiv.innerHTML = highlightCasic(textarea.value, textarea.selectionStart);
+        if (matchDiv) {
+            const query = getActiveHighlightQueryForEditor(textarea);
+            matchDiv.innerHTML = buildSelectionMatchHighlightHtml(textarea.value, query);
+        }
         if (isMain) {
             updateLineNumbers();
             updateCodeStats();
+        } else if (isFuncEditor) {
+            updateFuncLineNumbers();
+            updateFuncCodeStats();
         }
+        syncEditorDimensions(textarea, highlightDiv, matchDiv, gutter, allowScrollBeyond);
     };
+
+    editorUpdateCallbacks[id] = update;
+
+    function applyValueEditAndScroll(mutateFn) {
+        const savedTop = editorBody.scrollTop;
+        const savedLeft = editorBody.scrollLeft;
+        mutateFn();
+        update();
+        editorBody.scrollTop = savedTop;
+        editorBody.scrollLeft = savedLeft;
+        if (isMain && typeof syncPopupCode === 'function') {
+            syncPopupCode();
+        }
+        scrollCaretIntoView(textarea);
+    }
 
     textarea.addEventListener('input', function() {
         resetSuggestCycle();
+        if (isFuncEditor) {
+            syncMainFunctions();
+        }
         update();
+        if (isMain && typeof syncPopupCode === 'function') {
+            syncPopupCode();
+        }
+        scrollCaretIntoView(textarea);
         updateSuggestionsForEditor(textarea);
     });
 
@@ -904,6 +1329,14 @@ function setupEditor(id, isMain = false) {
         resetSuggestCycle();
         update();
         updateSuggestionsForEditor(textarea);
+    });
+
+    textarea.addEventListener('mouseup', function() {
+        update();
+    });
+
+    textarea.addEventListener('select', function() {
+        update();
     });
 
     textarea.addEventListener('focus', function() {
@@ -917,7 +1350,7 @@ function setupEditor(id, isMain = false) {
             suggestState.isTabHeld = false;
             return;
         }
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End') {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End' || e.key === 'Shift') {
             resetSuggestCycle();
             update();
             updateSuggestionsForEditor(textarea);
@@ -927,16 +1360,33 @@ function setupEditor(id, isMain = false) {
     textarea.addEventListener('blur', function() {
         suggestState.isTabHeld = false;
         resetSuggestCycle();
+        update();
     });
 
-    textarea.addEventListener('scroll', function() {
-        highlightDiv.scrollTop = textarea.scrollTop;
-        highlightDiv.scrollLeft = textarea.scrollLeft;
-        if (gutter) gutter.scrollTop = textarea.scrollTop;
+    editorBody.addEventListener('scroll', function() {
+        if (gutter) gutter.scrollTop = editorBody.scrollTop;
     });
 
     textarea.addEventListener('keydown', function(e) {
         if (e.isComposing) return;
+
+        // EscapeキーでCode全画面表示を解除できるようにする
+        if (e.key === 'Escape' && isMain) {
+            const codeCol = document.getElementById('code-column');
+            if (codeCol && codeCol.classList.contains('code-fullscreen')) {
+                e.preventDefault();
+                toggleCodeFullscreen();
+                return;
+            }
+        }
+
+        if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.key.toLowerCase() === 'h')) {
+            if (isMain || isFuncEditor) {
+                e.preventDefault();
+                openReplaceBar(id);
+                return;
+            }
+        }
 
         // 0. Tabを押しながら数字キー (1〜9) を押した場合
         if (suggestState.isTabHeld && e.key >= '1' && e.key <= '9') {
@@ -968,12 +1418,14 @@ function setupEditor(id, isMain = false) {
             if (!ctx.hasTextBeforeCursor) {
                 const spacesCount = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
                 const indentSpaces = ' '.repeat(spacesCount);
-                const start = this.selectionStart;
-                const end = this.selectionEnd;
-                const val = this.value;
-                this.value = val.substring(0, start) + indentSpaces + val.substring(end);
-                this.selectionStart = this.selectionEnd = start + indentSpaces.length;
-                update();
+                const self = this;
+                applyValueEditAndScroll(function() {
+                    const start = self.selectionStart;
+                    const end = self.selectionEnd;
+                    const val = self.value;
+                    self.value = val.substring(0, start) + indentSpaces + val.substring(end);
+                    self.selectionStart = self.selectionEnd = start + indentSpaces.length;
+                });
                 return;
             }
 
@@ -990,37 +1442,39 @@ function setupEditor(id, isMain = false) {
         // 2. Enterキーによる自動インデント
         if (e.key === 'Enter' && editorSettings.autoIndent) {
             e.preventDefault();
-            const start = this.selectionStart;
-            const end = this.selectionEnd;
-            const val = this.value;
+            const self = this;
+            applyValueEditAndScroll(function() {
+                const start = self.selectionStart;
+                const end = self.selectionEnd;
+                const val = self.value;
 
-            const lineStart = (start === 0) ? 0 : (val.lastIndexOf('\n', start - 1) + 1);
-            const nextNewlineIdx = val.indexOf('\n', end);
-            const lineEnd = (nextNewlineIdx === -1) ? val.length : nextNewlineIdx;
+                const lineStart = (start === 0) ? 0 : (val.lastIndexOf('\n', start - 1) + 1);
+                const nextNewlineIdx = val.indexOf('\n', end);
+                const lineEnd = (nextNewlineIdx === -1) ? val.length : nextNewlineIdx;
 
-            let currentIndent = '';
-            for (let i = lineStart; i < start; i++) {
-                const ch = val[i];
-                if (ch === ' ' || ch === '\t' || ch === CHAR_FW_SP) {
-                    currentIndent += ch;
-                } else {
-                    break;
+                let currentIndent = '';
+                for (let i = lineStart; i < start; i++) {
+                    const ch = val[i];
+                    if (ch === ' ' || ch === '\t' || ch === CHAR_FW_SP) {
+                        currentIndent += ch;
+                    } else {
+                        break;
+                    }
                 }
-            }
 
-            const lineBeforeCursor = val.slice(lineStart, start);
-            const lineAfterCursor = val.slice(end, lineEnd);
-            let extraIndent = '';
+                const lineBeforeCursor = val.slice(lineStart, start);
+                const lineAfterCursor = val.slice(end, lineEnd);
+                let extraIndent = '';
 
-            if (shouldAddExtraBlockIndent(lineBeforeCursor, lineAfterCursor)) {
-                const spacesCount = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
-                extraIndent = ' '.repeat(spacesCount);
-            }
+                if (shouldAddExtraBlockIndent(lineBeforeCursor, lineAfterCursor)) {
+                    const spacesCount = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
+                    extraIndent = ' '.repeat(spacesCount);
+                }
 
-            const insertText = '\n' + currentIndent + extraIndent;
-            this.value = val.substring(0, start) + insertText + val.substring(end);
-            this.selectionStart = this.selectionEnd = start + insertText.length;
-            update();
+                const insertText = '\n' + currentIndent + extraIndent;
+                self.value = val.substring(0, start) + insertText + val.substring(end);
+                self.selectionStart = self.selectionEnd = start + insertText.length;
+            });
             updateSuggestionsForEditor(this);
             return;
         }
@@ -1028,14 +1482,16 @@ function setupEditor(id, isMain = false) {
         // 3. `(` 入力時の自動閉じ括弧 `)`
         if (e.key === '(' && editorSettings.autoCloseParen) {
             e.preventDefault();
-            const start = this.selectionStart;
-            const end = this.selectionEnd;
-            const val = this.value;
-            const selected = val.substring(start, end);
-            this.value = val.substring(0, start) + '(' + selected + ')' + val.substring(end);
-            this.selectionStart = start + 1;
-            this.selectionEnd = end + 1;
-            update();
+            const self = this;
+            applyValueEditAndScroll(function() {
+                const start = self.selectionStart;
+                const end = self.selectionEnd;
+                const val = self.value;
+                const selected = val.substring(start, end);
+                self.value = val.substring(0, start) + '(' + selected + ')' + val.substring(end);
+                self.selectionStart = start + 1;
+                self.selectionEnd = end + 1;
+            });
             updateSuggestionsForEditor(this);
             return;
         }
@@ -1043,14 +1499,16 @@ function setupEditor(id, isMain = false) {
         // 3.5 `[` 入力時の自動閉じ括弧 `]`
         if (e.key === '[' && editorSettings.autoCloseBracket) {
             e.preventDefault();
-            const start = this.selectionStart;
-            const end = this.selectionEnd;
-            const val = this.value;
-            const selected = val.substring(start, end);
-            this.value = val.substring(0, start) + '[' + selected + ']' + val.substring(end);
-            this.selectionStart = start + 1;
-            this.selectionEnd = end + 1;
-            update();
+            const self = this;
+            applyValueEditAndScroll(function() {
+                const start = self.selectionStart;
+                const end = self.selectionEnd;
+                const val = self.value;
+                const selected = val.substring(start, end);
+                self.value = val.substring(0, start) + '[' + selected + ']' + val.substring(end);
+                self.selectionStart = start + 1;
+                self.selectionEnd = end + 1;
+            });
             updateSuggestionsForEditor(this);
             return;
         }
@@ -1059,14 +1517,16 @@ function setupEditor(id, isMain = false) {
         if ((e.key === '"' || e.key === "'") && editorSettings.autoCloseQuote) {
             e.preventDefault();
             const q = e.key;
-            const start = this.selectionStart;
-            const end = this.selectionEnd;
-            const val = this.value;
-            const selected = val.substring(start, end);
-            this.value = val.substring(0, start) + q + selected + q + val.substring(end);
-            this.selectionStart = start + 1;
-            this.selectionEnd = end + 1;
-            update();
+            const self = this;
+            applyValueEditAndScroll(function() {
+                const start = self.selectionStart;
+                const end = self.selectionEnd;
+                const val = self.value;
+                const selected = val.substring(start, end);
+                self.value = val.substring(0, start) + q + selected + q + val.substring(end);
+                self.selectionStart = start + 1;
+                self.selectionEnd = end + 1;
+            });
             updateSuggestionsForEditor(this);
             return;
         }
@@ -1074,6 +1534,23 @@ function setupEditor(id, isMain = false) {
 
     update();
 }
+
+window.addEventListener('resize', function() {
+    Object.keys(editorUpdateCallbacks).forEach(function(id) {
+        editorUpdateCallbacks[id]();
+    });
+});
+
+document.addEventListener('selectionchange', function() {
+    const active = document.activeElement;
+    if (active && active.tagName === 'TEXTAREA' && editorUpdateCallbacks[active.id]) {
+        const matchDiv = document.getElementById(active.id + '-match-highlight');
+        if (matchDiv) {
+            const query = getActiveHighlightQueryForEditor(active);
+            matchDiv.innerHTML = buildSelectionMatchHighlightHtml(active.value, query);
+        }
+    }
+});
 
 // ==========================================
 // 4. メモリ描画・コマンドラインログ・実行ボタン制御
@@ -1204,11 +1681,7 @@ function renderMainOutputBox() {
     if (!outDiv) return;
     const buf = state.outputBuffer || '';
     if (buf.length > MAIN_OUTPUT_DISPLAY_LIMIT) {
-        outDiv.textContent =
-            '※出力が長いため末尾5,000文字のみ表示しています（全' +
-            buf.length.toLocaleString() +
-            '文字の確認・一括コピーはOutputの「別窓」を開いてください）\n\n' +
-            buf.slice(-5000);
+        outDiv.textContent = buf.slice(-5000);
     } else {
         outDiv.textContent = buf;
     }
@@ -1218,6 +1691,7 @@ function renderMainOutputBox() {
 function appendOutputAndErrors(output, errors, isReplace = false, currentLineDisplay = '-', warnings = [], echoCmd = null) {
     if (typeof state.outputBuffer !== 'string' || isReplace) {
         state.outputBuffer = '';
+        state.outputTruncateWarned = false;
         if (typeof outputPagination !== 'undefined') {
             outputPagination.currentPage = 1;
         }
@@ -1228,7 +1702,19 @@ function appendOutputAndErrors(output, errors, isReplace = false, currentLineDis
     }
 
     renderMainOutputBox();
-    appendCmdlineMessages(errors, warnings, echoCmd);
+
+    const mergedWarnings = Array.isArray(warnings) ? warnings.slice() : [];
+    const bufLen = (state.outputBuffer || '').length;
+    if (bufLen > MAIN_OUTPUT_DISPLAY_LIMIT && !state.outputTruncateWarned) {
+        state.outputTruncateWarned = true;
+        mergedWarnings.push(
+            '※出力が長いためメイン画面では末尾5,000文字のみ表示しています（全' +
+            bufLen.toLocaleString() +
+            '文字の確認・コピーは出力の「別窓」を開いてください）'
+        );
+    }
+
+    appendCmdlineMessages(errors, mergedWarnings, echoCmd);
 
     const nextLineLabel = (state.pc >= 0 && state.pc < getMainCodeLinesArray().length) ? (state.pc + 1) : '-';
     const statsEl = document.getElementById('exec-stats');
@@ -1240,27 +1726,63 @@ function appendOutputAndErrors(output, errors, isReplace = false, currentLineDis
     syncPopupOutput();
 }
 
+function syncMainFunctions() {
+    state.functions = {};
+    let allErrors = [];
+
+    const funcEl = document.getElementById('func-code');
+    if (funcEl) {
+        const funcNormalized = String(funcEl.value).split('\r\n').join('\n');
+        const funcLines = funcNormalized.split('\n');
+        const funcCf = buildControlFlowStructure(funcLines, 1, true);
+
+        for (let i = 0; i < funcCf.errors.length; i++) {
+            allErrors.push('[関数タブ] ' + funcCf.errors[i]);
+        }
+
+        for (let idx = 0; idx < funcLines.length; idx++) {
+            const uncommented = cleanText(stripLineComment(funcLines[idx]));
+            if (uncommented === '') continue;
+
+            const info = funcCf.lineInfos[idx] || { kind: 'normal' };
+            const enclosing = funcCf.enclosingByLine[idx] || [];
+            const isInsideFunBlock = enclosing.some(function(b) { return b.type === 'fun'; });
+
+            if (info.kind === 'fun_single' || info.kind === 'fun_multi') {
+                continue;
+            }
+            if (info.kind === 'end' && info.block && info.block.type === 'fun') {
+                continue;
+            }
+            if (!isInsideFunBlock) {
+                allErrors.push('[関数タブ Line ' + (idx + 1) + '] 関数画面ではユーザー定義関数 (fun) の定義のみ可能です: ' + uncommented);
+            }
+        }
+    }
+
+    const codeEl = document.getElementById('code');
+    if (codeEl) {
+        const normalized = String(codeEl.value).split('\r\n').join('\n');
+        const lines = normalized.split('\n');
+        const cf = buildControlFlowStructure(lines, 1, true);
+        allErrors = allErrors.concat(cf.errors);
+    }
+
+    return allErrors;
+}
+
 function executeCommandLineString(cmdText) {
     const trimmed = cleanText(cmdText);
     if (trimmed === '') return;
-    syncMainFunctions();
+    const funcErrs = syncMainFunctions();
     const res = executeCasicCode(cmdText, 1, true);
-    appendOutputAndErrors(res.output, res.errors, false, 'Cmd', res.warnings, trimmed);
+    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, 'Cmd', res.warnings, trimmed);
 }
 
 function runCommandLineFromMain() {
     const inputEl = document.getElementById('cmdline-input');
     if (!inputEl) return;
     executeCommandLineString(inputEl.value);
-}
-
-function syncMainFunctions() {
-    const codeEl = document.getElementById('code');
-    if (!codeEl) return [];
-    const normalized = String(codeEl.value).split('\r\n').join('\n');
-    const lines = normalized.split('\n');
-    const cf = buildControlFlowStructure(lines, 1, true);
-    return cf.errors;
 }
 
 function setManualMemory() {
@@ -1287,6 +1809,7 @@ function setManualMemory() {
 
 function clearOutputOnly() {
     state.outputBuffer = '';
+    state.outputTruncateWarned = false;
     if (typeof outputPagination !== 'undefined') {
         outputPagination.currentPage = 1;
         outputPagination.totalPages = 1;
@@ -1303,6 +1826,7 @@ function resetEngine() {
     state.callStack = [];
     state.funcOutputBuffer = '';
     state.outputBuffer = '';
+    state.outputTruncateWarned = false;
     state.forStates = {};
     state.inputPtr = 0;
     state.rngSeed = null;
@@ -1334,12 +1858,14 @@ function resetEngine() {
 
 function runMain() {
     resetEngine();
+    const funcErrs = syncMainFunctions();
     const code = document.getElementById('code').value;
     const res = executeCasicCode(code, 1, false);
-    appendOutputAndErrors(res.output, res.errors, true, 'All', res.warnings);
+    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), true, 'All', res.warnings);
 }
 
 function stepMain() {
+    const funcErrs = syncMainFunctions();
     const lines = getMainCodeLinesArray();
     if (state.pc >= lines.length || state.pc < 0) {
         state.pc = 0;
@@ -1351,10 +1877,11 @@ function stepMain() {
         endLineIdx: lines.length - 1,
         maxSteps: 1
     });
-    appendOutputAndErrors(res.output, res.errors, false, lineIdx + 1, state.warnings);
+    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, lineIdx + 1, state.warnings);
 }
 
 function runClickedLine(lineIdx) {
+    const funcErrs = syncMainFunctions();
     const lines = getMainCodeLinesArray();
     if (lineIdx < 0 || lineIdx >= lines.length) return;
     state.pc = lineIdx;
@@ -1362,7 +1889,7 @@ function runClickedLine(lineIdx) {
     const labelScan = buildLabelMap(lines, 1);
     const cfStructure = buildControlFlowStructure(lines, 1, true);
     const res = executeLineWithControlFlow(lineIdx, lines, 1, labelScan.labels, cfStructure, true);
-    const allErrors = labelScan.errors.concat(cfStructure.errors, res.errors);
+    const allErrors = funcErrs.concat(labelScan.errors, cfStructure.errors, res.errors);
 
     if (res.nextLineIdx < lines.length && res.nextLineIdx !== lineIdx + 1) {
         state.pc = res.nextLineIdx;
@@ -1372,12 +1899,12 @@ function runClickedLine(lineIdx) {
 }
 
 function runSub(num) {
-    syncMainFunctions();
+    const funcErrs = syncMainFunctions();
     const subEl = document.getElementById('sub-code' + num);
     if (!subEl) return;
     const code = subEl.value;
     const res = executeCasicCode(code, 1, true);
-    appendOutputAndErrors(res.output, res.errors, false, 'Sub' + num, res.warnings);
+    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, 'Sub' + num, res.warnings);
 }
 
 window.onload = function() {
@@ -1385,6 +1912,7 @@ window.onload = function() {
     initSettingsModalEvents();
 
     state.outputBuffer = '';
+    state.outputTruncateWarned = false;
 
     document.getElementById('input-data').value = [
         '3',
@@ -1407,28 +1935,44 @@ window.onload = function() {
         });
     }
 
-    const BS = CHAR_BSLASH;
+    const funcCodeEl = document.getElementById('func-code');
+    if (funcCodeEl) {
+        funcCodeEl.value = [
+            '# ユーザー定義関数（このタブでは fun の定義のみ記述できます）',
+            'fun calc_score(x, y) return x * 5 + y * 2',
+            '',
+            'fun sum_to(n)',
+            '    for(_i, n)',
+            '        _ans += _i',
+            '    end',
+            '    return _ans',
+            'end'
+        ].join('\n');
+    }
+
     document.getElementById('code').value = [
-        '# 1. 新規文字列関数 (between_replace / between_list / unescape / count)',
-        'out between_replace("<abc>def<geh>", "<", ">", "z")',
-        'out join(between_list("/aa/b' + BS + BS + '", "/", "' + BS + '", -1))',
-        'out unescape("&apos;&omega;&apos;おはよう")',
-        'out json(count([3, 1, 4, 1, 5, 9, 2, 6, 5]))',
-        'out "clamp=" & clamp(130, 0, 100)'
+        '# 関数タブで定義した calc_score() と sum_to() を呼び出すテスト',
+        'out "calc_score(2, 3) = " & calc_score(2, 3)',
+        'out "sum_to(10) = " & sum_to(10)',
+        '',
+        '# 改訂で追加された between_get / dist / 三角関数',
+        'out "between_get = " & between_get("<<abc>def<geh>>", "<", ">", "2")',
+        'out "dist = " & dist(10, 10, 50, 40)',
+        'out "sin(90)=" & sin(90) & " / cos(180)=" & cos(180) & " / atan2(-5,-5)=" & atan2(-5, -5)'
     ].join('\n');
 
     document.getElementById('cmdline-input').value = 'cont';
 
     document.getElementById('sub-code1').value = [
-        '# 大量出力（5000文字改ページ＆一括コピー確認用：約3万文字出力）',
         'out rep("0123456789ABCDEF", 2000)'
     ].join('\n');
 
-    document.getElementById('sub-code2').value = 'run 1:5';
+    document.getElementById('sub-code2').value = 'run 1:3';
 
-    setupEditor('code', true);
+    setupEditor('code', true, false);
+    setupEditor('func-code', false, true);
     for (let i = 1; i <= 2; i++) {
-        setupEditor('sub-code' + i, false);
+        setupEditor('sub-code' + i, false, false);
     }
     syncMainFunctions();
     renderMemoryUI();

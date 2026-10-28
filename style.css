@@ -1,11 +1,13 @@
 :root {
     --vscode-font: Menlo, Monaco, Consolas, "Courier New", monospace;
+    --tab-size: 4;
+    --editor-font-size: 18px;
 }
 
 body {
     font-family: sans-serif;
     margin: 0;
-    padding: 14px;
+    padding: 10px 14px 14px 14px;
     background-color: #1e1e1e;
     color: #d4d4d4;
     height: 100vh;
@@ -17,6 +19,70 @@ body {
     display: none !important;
 }
 
+/* アプリ全体の縦枠（上部タブバー ＋ 下部タブ中身） */
+.app-shell {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    gap: 10px;
+    min-height: 0;
+}
+
+/* 上部：仮想タブバー */
+.virtual-tab-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: #252526;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    padding: 4px 6px;
+    flex-shrink: 0;
+}
+
+.tab-buttons-group {
+    display: flex;
+    gap: 6px;
+}
+
+button.vtab-btn {
+    width: auto;
+    height: 34px;
+    padding: 0 22px;
+    font-size: 14px;
+    font-weight: bold;
+    background-color: #2d2d2d;
+    color: #aaa;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+button.vtab-btn:hover {
+    background-color: #383839;
+    color: #e0e0e0;
+}
+button.vtab-btn.active {
+    background-color: #094771;
+    color: #ffffff;
+    border-color: #00a8ff;
+}
+
+.tab-views-container {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    position: relative;
+}
+
+.tab-pane {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+/* ① コード画面タブのワークスペース */
 .workspace {
     display: flex;
     width: 100%;
@@ -33,6 +99,19 @@ body {
     min-width: 0;
     min-height: 0;
     height: 100%;
+}
+
+/* Code欄の画面内全画面表示モード */
+.code-column.code-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 950;
+    background-color: #1e1e1e;
+    padding: 12px 16px;
+    box-sizing: border-box;
 }
 
 /* 2. 中央カラム：コマンドライン / 実行1・2 / 入力・出力 / ボタン群 */
@@ -61,12 +140,38 @@ body {
     box-sizing: border-box;
 }
 
+/* ② 関数画面タブ（一面コード入力欄） */
+.func-tab-layout {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+
+.func-editor-container {
+    flex: 1;
+    min-height: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.func-line-numbers .line-num {
+    cursor: default;
+}
+.func-line-numbers .line-num:hover {
+    background-color: transparent;
+    color: #858585;
+}
+
 .pane-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 4px;
     flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 .pane-header h3 {
     margin: 0;
@@ -77,7 +182,25 @@ body {
 .header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.inline-font-ctrl {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background-color: #252526;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 1px 3px;
+}
+.font-size-badge {
+    font-family: var(--vscode-font);
+    font-size: 11px;
+    color: #9cdcfe;
+    min-width: 32px;
+    text-align: center;
 }
 
 .stats {
@@ -85,6 +208,66 @@ body {
     color: #888;
     font-family: var(--vscode-font);
     white-space: nowrap;
+}
+
+/* 検索・置換バー */
+.replace-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background-color: #252526;
+    border: 1px solid #444;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 6px 10px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+.replace-bar-inputs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 240px;
+}
+.replace-bar-inputs input {
+    flex: 1;
+    min-width: 90px;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-family: var(--vscode-font);
+    font-size: 13px;
+    outline: none;
+}
+.replace-bar-inputs input:focus {
+    border-color: #007acc;
+}
+.find-count-badge {
+    font-family: var(--vscode-font);
+    font-size: 11px;
+    color: #9cdcfe;
+    min-width: 38px;
+    text-align: center;
+    white-space: nowrap;
+}
+.replace-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+button.replace-exec-btn {
+    background-color: #0f8f62;
+    border-color: #0f8f62;
+    color: #fff;
+    font-weight: bold;
+}
+button.replace-exec-btn:hover {
+    background-color: #0b6b49;
 }
 
 /* エディタ共通 */
@@ -109,7 +292,7 @@ body {
     border-bottom-right-radius: 0;
 }
 
-/* Code欄の下の予測変換（サジェストバー） */
+/* 予測変換（サジェストバー） */
 .suggest-bar {
     flex: 0 0 58px;
     height: 58px;
@@ -131,14 +314,11 @@ body {
     white-space: nowrap;
     user-select: none;
     box-sizing: border-box;
-    scrollbar-width: thin;
+    scrollbar-width: none;
 }
 .suggest-bar::-webkit-scrollbar {
-    height: 6px;
-}
-.suggest-bar::-webkit-scrollbar-thumb {
-    background-color: #555;
-    border-radius: 3px;
+    display: none;
+    height: 0;
 }
 .suggest-placeholder {
     color: #888;
@@ -176,13 +356,13 @@ body {
 }
 
 .line-numbers {
-    width: 44px;
+    min-width: 44px;
     background-color: #252526;
     border-right: 1px solid #3c3c3c;
     padding: 15px 0;
     box-sizing: border-box;
     font-family: var(--vscode-font);
-    font-size: 18px;
+    font-size: var(--editor-font-size, 18px);
     line-height: 1.5;
     text-align: right;
     user-select: none;
@@ -190,7 +370,7 @@ body {
     flex-shrink: 0;
 }
 .line-num {
-    padding: 0 8px 0 4px;
+    padding: 0 8px 0 6px;
     color: #858585;
     cursor: pointer;
     transition: background-color 0.15s, color 0.15s;
@@ -205,33 +385,62 @@ body {
     font-weight: bold;
 }
 
+/* .editor-body：上下スクロールバーは表示し、左右（横）スクロールバーのみ非表示にする */
 .editor-body {
     position: relative;
     flex: 1;
     height: 100%;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+.editor-body::-webkit-scrollbar {
+    width: 10px;
+    height: 0px;
+}
+.editor-body::-webkit-scrollbar:horizontal {
+    height: 0px !important;
+    display: none !important;
+}
+.editor-body::-webkit-scrollbar-thumb:vertical {
+    background-color: #4a4a4a;
+    border-radius: 5px;
+}
+.editor-body::-webkit-scrollbar-thumb:vertical:hover {
+    background-color: #666;
+}
+.editor-body::-webkit-scrollbar-corner {
+    background: transparent;
 }
 
-.highlight-layer, .code-textarea {
+.match-highlight-layer, .highlight-layer, .code-textarea {
     position: absolute;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
+    min-width: 100%;
+    min-height: 100%;
     padding: 15px;
     box-sizing: border-box;
     font-family: var(--vscode-font);
-    font-size: 18px;
+    font-size: var(--editor-font-size, 18px);
     line-height: 1.5;
     margin: 0;
     border: none;
-    overflow-y: auto;
-    overflow-x: auto;
+    overflow: hidden;
     white-space: pre;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
+    font-feature-settings: "palt" 0;
+}
+.match-highlight-layer {
+    color: transparent;
+    pointer-events: none;
+    z-index: 1;
 }
 .highlight-layer {
     color: #d4d4d4;
     pointer-events: none;
+    z-index: 2;
 }
 .code-textarea {
     background: transparent;
@@ -239,6 +448,14 @@ body {
     caret-color: #d4d4d4;
     resize: none;
     outline: none;
+    z-index: 3;
+}
+
+/* 範囲選択した文字列と同じ文字列を薄い白でハイライト */
+.selection-match-highlight {
+    background-color: rgba(255, 255, 255, 0.22);
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
 /* 中央1段目：コマンドライン */
@@ -265,8 +482,12 @@ body {
     font-size: 12px;
     line-height: 1.4;
     overflow-y: auto;
+    overflow-x: hidden;
     white-space: pre-wrap;
     word-break: break-all;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
 }
 .cmdline-input-row {
     display: flex;
@@ -286,6 +507,10 @@ body {
     font-size: 13px;
     line-height: 1.35;
     outline: none;
+    overflow-x: hidden;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
 }
 .cmdline-input:focus {
     border-color: #007acc;
@@ -319,6 +544,7 @@ button.cmdline-run-btn:hover {
     flex: 1;
     min-height: 0;
 }
+.sub-editor-container .match-highlight-layer,
 .sub-editor-container .highlight-layer,
 .sub-editor-container .code-textarea {
     font-size: 15px;
@@ -357,6 +583,12 @@ button.cmdline-run-btn:hover {
     margin: 0;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    white-space: pre-wrap;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
+    font-feature-settings: "palt" 0;
 }
 #input-data:focus {
     outline: none;
@@ -375,14 +607,19 @@ button.cmdline-run-btn:hover {
     line-height: 1.4;
     white-space: pre-wrap;
     overflow-y: auto;
+    overflow-x: hidden;
     word-break: break-all;
     margin: 0;
     box-sizing: border-box;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
+    font-feature-settings: "palt" 0;
 }
 
 /* 中央4段目：ボタン群 */
 .button-cluster {
-    flex: 0 0 106px;
+    flex: 0 0 100px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -399,8 +636,8 @@ button.cmdline-run-btn:hover {
     gap: 8px;
     min-height: 0;
 }
-.button-cluster-row-4 {
-    grid-template-columns: repeat(4, 1fr);
+.button-cluster-row-2 {
+    grid-template-columns: repeat(2, 1fr);
 }
 
 button {
@@ -440,21 +677,6 @@ button.step-btn {
 }
 button.step-btn:hover {
     background-color: #b36e32;
-}
-
-button.import-btn {
-    background-color: #6b46c1;
-    font-size: 14px;
-}
-button.import-btn:hover {
-    background-color: #553c9a;
-}
-
-button.settings-btn {
-    background-color: #4a5568;
-}
-button.settings-btn:hover {
-    background-color: #384152;
 }
 
 button.small-tool-btn {
@@ -501,7 +723,7 @@ button.run-mini-btn:hover {
 button.set-mem-btn { width: 42px; flex-shrink: 0; background-color: #d48844; font-size: 11px; height: 24px; padding: 0; border-radius: 3px; }
 button.set-mem-btn:hover { background-color: #b36e32; }
 
-.memory-container { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 2px; }
+.memory-container { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
 
 .memory-cell {
     width: 100%;
@@ -530,10 +752,11 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     flex: 1;
     min-width: 0;
     text-align: right;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
 }
-.cell-value::-webkit-scrollbar { height: 4px; }
-.cell-value::-webkit-scrollbar-thumb { background-color: #666; border-radius: 2px; }
+.cell-value::-webkit-scrollbar { display: none; height: 0; }
 
 .memory-array-box {
     width: 100%;
@@ -570,6 +793,7 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 2px 4px;
     display: flex;
     flex-direction: column;
@@ -596,127 +820,38 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     flex: 1;
     min-width: 0;
     text-align: right;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
 }
-.array-item-val::-webkit-scrollbar { height: 4px; }
-.array-item-val::-webkit-scrollbar-thumb { background-color: #666; border-radius: 2px; }
+.array-item-val::-webkit-scrollbar { display: none; height: 0; }
 .memory-empty { color: #666; font-size: 12px; text-align: center; margin-top: 20px; font-family: var(--vscode-font); }
 
-/* 設定＆インポート共通モーダル */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background-color: rgba(0, 0, 0, 0.72);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-}
-.modal-box {
-    width: 440px;
-    max-width: 94vw;
+/* ③ インポート画面タブ専用レイアウト */
+.import-tab-layout {
+    width: 100%;
+    height: 100%;
     background-color: #252526;
-    border: 1px solid #555;
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    border: 1px solid #444;
+    border-radius: 6px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    box-sizing: border-box;
 }
-.modal-header {
+.import-tab-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 18px;
+    padding: 10px 16px;
     background-color: #2d2d2d;
     border-bottom: 1px solid #444;
     flex-shrink: 0;
 }
-.modal-header h3 {
+.import-tab-header h3 {
     margin: 0;
-    font-size: 16px;
+    font-size: 15px;
     color: #e0e0e0;
-}
-button.modal-close-btn {
-    width: 30px;
-    height: 30px;
-    background: transparent;
-    color: #aaa;
-    font-size: 22px;
-    line-height: 1;
-    padding: 0;
-}
-button.modal-close-btn:hover {
-    background-color: #444;
-    color: #fff;
-}
-.modal-body {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
-.setting-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 14px;
-    color: #d4d4d4;
-}
-.setting-item label {
-    cursor: pointer;
-    user-select: none;
-}
-.setting-item input[type="number"] {
-    width: 64px;
-    padding: 5px 8px;
-    background-color: #1e1e1e;
-    color: #d4d4d4;
-    border: 1px solid #555;
-    border-radius: 4px;
-    font-family: var(--vscode-font);
-    font-size: 14px;
-    text-align: center;
-}
-.setting-item input[type="number"]:focus {
-    outline: none;
-    border-color: #007acc;
-}
-.setting-item input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    accent-color: #007acc;
-    cursor: pointer;
-}
-.modal-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 18px;
-    background-color: #2d2d2d;
-    border-top: 1px solid #444;
-    flex-shrink: 0;
-}
-.setting-save-note {
-    font-size: 12px;
-    color: #999;
-}
-button.modal-ok-btn {
-    width: 90px;
-    height: 34px;
-    font-size: 14px;
-    background-color: #007acc;
-}
-
-/* インポートモーダル専用（画面全体よりほんの少し小さい特大サイズ・縦4段均等・横並び固定サイズ） */
-.import-modal-box {
-    width: 96vw;
-    max-width: 96vw;
-    height: 94vh;
-    max-height: 94vh;
 }
 .import-header-title {
     display: flex;
@@ -749,7 +884,6 @@ button.import-all-btn:hover {
     outline-offset: -6px;
 }
 
-/* 縦4段：高さを均等4分割し、中身の画像サイズで段が広がらないよう厳密に固定 */
 .asset-tier {
     flex: 1 1 0;
     min-height: 0;
@@ -780,7 +914,6 @@ button.import-all-btn:hover {
     font-weight: normal;
 }
 
-/* 同じ種類のアセットを横に並べるコンテナ */
 .asset-row-list {
     flex: 1 1 0;
     min-height: 0;
@@ -813,7 +946,6 @@ button.import-all-btn:hover {
     font-family: var(--vscode-font);
 }
 
-/* 各アセットカード：横幅180px・高さ100%に完全固定 */
 .asset-card {
     width: 180px;
     min-width: 180px;
@@ -840,7 +972,6 @@ button.import-all-btn:hover {
     flex-shrink: 0;
 }
 
-/* 名前変更用の直接入力ボックス */
 .asset-name-input {
     flex: 1;
     min-width: 0;
@@ -882,7 +1013,6 @@ button.asset-del-btn:hover {
     color: #fff;
 }
 
-/* プレビュー枠 */
 .asset-preview-box {
     position: relative;
     flex: 1 1 0;
@@ -959,4 +1089,86 @@ button.asset-play-btn {
 }
 button.asset-play-btn:hover {
     background-color: #0b6b49;
+}
+
+/* ④ 設定画面タブ専用レイアウト */
+.settings-tab-layout {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 24px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+.settings-card {
+    width: 580px;
+    max-width: 95%;
+    background-color: #252526;
+    border: 1px solid #444;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.settings-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    background-color: #2d2d2d;
+    border-bottom: 1px solid #444;
+}
+.settings-card-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #e0e0e0;
+}
+.settings-card-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+.setting-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 15px;
+    color: #d4d4d4;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #333;
+}
+.setting-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+.setting-item label {
+    cursor: pointer;
+    user-select: none;
+}
+.setting-item input[type="number"] {
+    width: 72px;
+    padding: 6px 8px;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-family: var(--vscode-font);
+    font-size: 15px;
+    text-align: center;
+}
+.setting-item input[type="number"]:focus {
+    outline: none;
+    border-color: #007acc;
+}
+.setting-item input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: #007acc;
+    cursor: pointer;
+}
+.setting-save-note {
+    font-size: 12px;
+    color: #999;
 }

@@ -11,238 +11,328 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="workspace">
-        <!-- 左カラム：Code（縦いっぱい）＋ 下部サジェストバー -->
-        <div class="code-column">
-            <div class="pane-header">
-                <h3>Code <span style="font-size:12px; font-weight:normal; color:#888;">(行番号クリックでその行だけ実行)</span></h3>
-                <span id="code-stats" class="stats">Lines: 0 | Length: 0 | Pos: 0</span>
-            </div>
-            <div id="code-container" class="editor-container">
-                <div id="line-numbers" class="line-numbers"></div>
-                <div class="editor-body">
-                    <div id="code-highlight" class="highlight-layer"></div>
-                    <textarea id="code" class="code-textarea" spellcheck="false" placeholder="ここにCASICのコードを書く..."></textarea>
-                </div>
-            </div>
-            <!-- 予測変換（サジェストバー） -->
-            <div id="suggest-bar" class="suggest-bar">
-                <span class="suggest-placeholder">予測変換: 文字を入力すると候補が表示されます (Tabで選択 / Tab+数字で直接指定)</span>
+    <div class="app-shell">
+        <!-- 上部：仮想タブバー -->
+        <div class="virtual-tab-bar">
+            <div class="tab-buttons-group">
+                <button id="tab-btn-code" class="vtab-btn active" onclick="switchVirtualTab('code')">コード</button>
+                <button id="tab-btn-func" class="vtab-btn" onclick="switchVirtualTab('func')">関数</button>
+                <button id="tab-btn-import" class="vtab-btn" onclick="switchVirtualTab('import')">インポート</button>
+                <button id="tab-btn-settings" class="vtab-btn" onclick="switchVirtualTab('settings')">設定</button>
             </div>
         </div>
 
-        <!-- 中央カラム：1.コマンドライン / 2.実行1・実行2 / 3.入力・出力 / 4.ボタン群 -->
-        <div class="center-column">
-            <!-- 1段目：コマンドライン -->
-            <div class="cmdline-section">
-                <div class="pane-header">
-                    <h3>コマンドライン</h3>
-                    <div class="header-actions">
-                        <span id="exec-stats" class="stats">Next: 1 | InPtr: 0 | Steps: 0</span>
-                        <button class="small-tool-btn" onclick="clearCmdlineLog()" title="ログをクリア">クリア</button>
-                        <button class="small-tool-btn" onclick="openPopupWindow('cmdline')" title="コマンドラインを別ウィンドウで開く">別窓</button>
-                    </div>
-                </div>
-                <div id="cmdline-log" class="cmdline-log"></div>
-                <div class="cmdline-input-row">
-                    <textarea id="cmdline-input" class="cmdline-input" spellcheck="false" placeholder="cont, run 2:3, goto 2, step 2... (Ctrl+Enterで実行)"></textarea>
-                    <button class="cmdline-run-btn" onclick="runCommandLineFromMain()">実行</button>
-                </div>
-            </div>
+        <!-- タブの中身コンテナ -->
+        <div class="tab-views-container">
 
-            <!-- 2段目：実行1 ＆ 実行2 -->
-            <div class="sub-editors-row">
-                <div class="sub-box" id="box-sub1">
-                    <div class="pane-header">
-                        <h3>実行1</h3>
-                        <button class="small-tool-btn run-mini-btn" onclick="runSub(1)">▶ 実行</button>
+            <!-- ① コード画面タブ -->
+            <div id="tab-pane-code" class="tab-pane">
+                <div class="workspace">
+                    <!-- 左カラム：Code（縦いっぱい）＋ 検索置換バー ＋ 下部サジェストバー -->
+                    <div id="code-column" class="code-column">
+                        <div class="pane-header">
+                            <h3>Code <span style="font-size:12px; font-weight:normal; color:#888;">(行番号クリックでその行だけ実行)</span></h3>
+                            <div class="header-actions">
+                                <span id="code-stats" class="stats">Lines: 0 | Length: 0 | Pos: 0</span>
+                                <div class="inline-font-ctrl" title="コードの文字サイズ変更">
+                                    <button class="small-tool-btn" onclick="changeEditorFontSize(-2)">-</button>
+                                    <span id="code-font-size-label" class="font-size-badge">18px</span>
+                                    <button class="small-tool-btn" onclick="changeEditorFontSize(2)">+</button>
+                                </div>
+                                <button class="small-tool-btn" onclick="toggleReplaceBar('code')" title="検索と置換 (Ctrl+F / Ctrl+H)">置換</button>
+                                <button id="btn-code-fullscreen" class="small-tool-btn" onclick="toggleCodeFullscreen()" title="タブ内でCode欄を全画面拡大/解除 (F11 / Esc)">全画面</button>
+                                <button class="small-tool-btn" onclick="openPopupWindow('code')" title="コードを別ウィンドウで開く">別窓</button>
+                            </div>
+                        </div>
+
+                        <!-- Code用 検索・置換バー -->
+                        <div id="code-replace-bar" class="replace-bar hidden">
+                            <div class="replace-bar-inputs">
+                                <input type="text" id="code-find-input" placeholder="検索する文字列..." oninput="onFindInputChanged('code')" onkeydown="handleReplaceBarKeyDown(event, 'code', 'find')">
+                                <span id="code-find-count" class="find-count-badge">0件</span>
+                                <input type="text" id="code-replace-input" placeholder="置換後の文字列..." onkeydown="handleReplaceBarKeyDown(event, 'code', 'replace')">
+                            </div>
+                            <div class="replace-bar-actions">
+                                <button class="small-tool-btn" onclick="findNextMatch('code')">次へ</button>
+                                <button class="small-tool-btn replace-exec-btn" onclick="replaceSingleMatch('code')">置換</button>
+                                <button class="small-tool-btn replace-exec-btn" onclick="replaceAllMatches('code')">すべて置換</button>
+                                <button class="small-tool-btn" onclick="closeReplaceBar('code')" title="閉じる">×</button>
+                            </div>
+                        </div>
+
+                        <div id="code-container" class="editor-container">
+                            <div id="line-numbers" class="line-numbers"></div>
+                            <div id="code-editor-body" class="editor-body">
+                                <div id="code-match-highlight" class="match-highlight-layer"></div>
+                                <div id="code-highlight" class="highlight-layer"></div>
+                                <textarea id="code" class="code-textarea" spellcheck="false" placeholder="ここにCASICのコードを書く..."></textarea>
+                            </div>
+                        </div>
+                        <!-- 予測変換（サジェストバー） -->
+                        <div id="suggest-bar" class="suggest-bar">
+                            <span class="suggest-placeholder">予測変換: 文字を入力すると候補が表示されます (Tabで選択 / Tab+数字で直接指定)</span>
+                        </div>
                     </div>
-                    <div id="sub-code1-container" class="editor-container sub-editor-container">
-                        <div class="editor-body">
-                            <div id="sub-code1-highlight" class="highlight-layer"></div>
-                            <textarea id="sub-code1" class="code-textarea" spellcheck="false" placeholder="追加コード1..."></textarea>
+
+                    <!-- 中央カラム：1.コマンドライン / 2.実行1・実行2 / 3.入力・出力 / 4.ボタン群 -->
+                    <div class="center-column">
+                        <!-- 1段目：コマンドライン -->
+                        <div class="cmdline-section">
+                            <div class="pane-header">
+                                <h3>コマンドライン</h3>
+                                <div class="header-actions">
+                                    <span id="exec-stats" class="stats">Next: 1 | InPtr: 0 | Steps: 0</span>
+                                    <button class="small-tool-btn" onclick="clearCmdlineLog()" title="ログをクリア">クリア</button>
+                                    <button class="small-tool-btn" onclick="openPopupWindow('cmdline')" title="コマンドラインを別ウィンドウで開く">別窓</button>
+                                </div>
+                            </div>
+                            <div id="cmdline-log" class="cmdline-log"></div>
+                            <div class="cmdline-input-row">
+                                <textarea id="cmdline-input" class="cmdline-input" spellcheck="false" placeholder="cont, run 2:3, goto 2, step 2, reset... (Ctrl+Enterで実行)"></textarea>
+                                <button class="cmdline-run-btn" onclick="runCommandLineFromMain()">実行</button>
+                            </div>
+                        </div>
+
+                        <!-- 2段目：実行1 ＆ 実行2 -->
+                        <div class="sub-editors-row">
+                            <div class="sub-box" id="box-sub1">
+                                <div class="pane-header">
+                                    <h3>実行1</h3>
+                                    <button class="small-tool-btn run-mini-btn" onclick="runSub(1)">▶ 実行</button>
+                                </div>
+                                <div id="sub-code1-container" class="editor-container sub-editor-container">
+                                    <div id="sub-code1-editor-body" class="editor-body">
+                                        <div id="sub-code1-match-highlight" class="match-highlight-layer"></div>
+                                        <div id="sub-code1-highlight" class="highlight-layer"></div>
+                                        <textarea id="sub-code1" class="code-textarea" spellcheck="false" placeholder="追加コード1..."></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="sub-box" id="box-sub2">
+                                <div class="pane-header">
+                                    <h3>実行2</h3>
+                                    <button class="small-tool-btn run-mini-btn" onclick="runSub(2)">▶ 実行</button>
+                                </div>
+                                <div id="sub-code2-container" class="editor-container sub-editor-container">
+                                    <div id="sub-code2-editor-body" class="editor-body">
+                                        <div id="sub-code2-match-highlight" class="match-highlight-layer"></div>
+                                        <div id="sub-code2-highlight" class="highlight-layer"></div>
+                                        <textarea id="sub-code2" class="code-textarea" spellcheck="false" placeholder="追加コード2..."></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 3段目：入力 ＆ 出力 -->
+                        <div class="io-row">
+                            <div class="io-box">
+                                <div class="pane-header">
+                                    <h3>入力</h3>
+                                    <div class="header-actions">
+                                        <button class="small-tool-btn" onclick="openPopupWindow('input')" title="入力を別ウィンドウで開く">別窓</button>
+                                    </div>
+                                </div>
+                                <textarea id="input-data" spellcheck="false" placeholder="入力データ..."></textarea>
+                            </div>
+                            <div class="io-box">
+                                <div class="pane-header">
+                                    <h3>出力</h3>
+                                    <div class="header-actions">
+                                        <button class="small-tool-btn" onclick="clearOutputOnly()" title="出力をクリア">クリア</button>
+                                        <button class="small-tool-btn" onclick="openPopupWindow('output')" title="出力を別ウィンドウで開く">別窓</button>
+                                    </div>
+                                </div>
+                                <div id="output" class="output-area"></div>
+                            </div>
+                        </div>
+
+                        <!-- 4段目：ボタン群 -->
+                        <div class="button-cluster">
+                            <div class="button-cluster-row">
+                                <button onclick="runMain()">RUN</button>
+                                <button class="step-btn" onclick="stepMain()">ステップ</button>
+                                <button class="init-btn" onclick="resetEngine()">初期化</button>
+                            </div>
+                            <div class="button-cluster-row button-cluster-row-2">
+                                <button class="sub-btn" onclick="runSub(1)">実行1</button>
+                                <button class="sub-btn" onclick="runSub(2)">実行2</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右カラム：メモリ（縦いっぱい） -->
+                    <div class="memory-column">
+                        <div class="memory-header">
+                            <div class="memory-header-top">
+                                <div style="font-size: 14px; color: #bbb; font-weight: bold;">メモリ</div>
+                                <div class="header-actions">
+                                    <button class="small-tool-btn" onclick="openPopupWindow('memory')" title="メモリを別ウィンドウで開く">別窓</button>
+                                </div>
+                            </div>
+                            <div class="memory-inputs">
+                                <input type="text" id="manual-mem-name" placeholder="名前 (a, b[])" title="変数名または配列名">
+                                <input type="text" id="manual-mem-val" placeholder="値 (12, [a,b])" title="設定する値">
+                                <button class="set-mem-btn" onclick="setManualMemory()">SET</button>
+                            </div>
+                        </div>
+                        <div id="memory" class="memory-container">
+                            <div class="memory-empty">メモリは空です</div>
                         </div>
                     </div>
                 </div>
-                <div class="sub-box" id="box-sub2">
-                    <div class="pane-header">
-                        <h3>実行2</h3>
-                        <button class="small-tool-btn run-mini-btn" onclick="runSub(2)">▶ 実行</button>
-                    </div>
-                    <div id="sub-code2-container" class="editor-container sub-editor-container">
-                        <div class="editor-body">
-                            <div id="sub-code2-highlight" class="highlight-layer"></div>
-                            <textarea id="sub-code2" class="code-textarea" spellcheck="false" placeholder="追加コード2..."></textarea>
-                        </div>
-                    </div>
-                </div>
             </div>
 
-            <!-- 3段目：入力 ＆ 出力 -->
-            <div class="io-row">
-                <div class="io-box">
+            <!-- ② 関数画面タブ（一面コード入力欄・ユーザー定義関数専用） -->
+            <div id="tab-pane-func" class="tab-pane hidden">
+                <div class="func-tab-layout">
                     <div class="pane-header">
-                        <h3>入力</h3>
+                        <h3>Function <span style="font-size:12px; font-weight:normal; color:#888;">(ユーザー定義関数 fun の定義専用画面・ここで定義した関数はコード画面から呼び出せます)</span></h3>
                         <div class="header-actions">
-                            <button class="small-tool-btn" onclick="openPopupWindow('input')" title="入力を別ウィンドウで開く">別窓</button>
+                            <span id="func-code-stats" class="stats">Lines: 0 | Length: 0 | Pos: 0</span>
+                            <div class="inline-font-ctrl" title="文字サイズ変更">
+                                <button class="small-tool-btn" onclick="changeEditorFontSize(-2)">-</button>
+                                <span id="func-font-size-label" class="font-size-badge">18px</span>
+                                <button class="small-tool-btn" onclick="changeEditorFontSize(2)">+</button>
+                            </div>
+                            <button class="small-tool-btn" onclick="toggleReplaceBar('func-code')" title="検索と置換 (Ctrl+F / Ctrl+H)">置換 / 検索</button>
                         </div>
                     </div>
-                    <textarea id="input-data" spellcheck="false" placeholder="入力データ..."></textarea>
-                </div>
-                <div class="io-box">
-                    <div class="pane-header">
-                        <h3>出力</h3>
-                        <div class="header-actions">
-                            <button class="small-tool-btn" onclick="clearOutputOnly()" title="出力をクリア">クリア</button>
-                            <button class="small-tool-btn" onclick="openPopupWindow('output')" title="出力を別ウィンドウで開く">別窓</button>
+
+                    <!-- Function用 検索・置換バー -->
+                    <div id="func-code-replace-bar" class="replace-bar hidden">
+                        <div class="replace-bar-inputs">
+                            <input type="text" id="func-code-find-input" placeholder="検索する文字列..." oninput="onFindInputChanged('func-code')" onkeydown="handleReplaceBarKeyDown(event, 'func-code', 'find')">
+                            <span id="func-code-find-count" class="find-count-badge">0件</span>
+                            <input type="text" id="func-code-replace-input" placeholder="置換後の文字列..." onkeydown="handleReplaceBarKeyDown(event, 'func-code', 'replace')">
+                        </div>
+                        <div class="replace-bar-actions">
+                            <button class="small-tool-btn" onclick="findNextMatch('func-code')">次へ</button>
+                            <button class="small-tool-btn replace-exec-btn" onclick="replaceSingleMatch('func-code')">置換</button>
+                            <button class="small-tool-btn replace-exec-btn" onclick="replaceAllMatches('func-code')">すべて置換</button>
+                            <button class="small-tool-btn" onclick="closeReplaceBar('func-code')" title="閉じる">×</button>
                         </div>
                     </div>
-                    <div id="output" class="output-area"></div>
-                </div>
-            </div>
 
-            <!-- 4段目：ボタン群 -->
-            <div class="button-cluster">
-                <div class="button-cluster-row">
-                    <button onclick="runMain()">RUN</button>
-                    <button class="step-btn" onclick="stepMain()">ステップ</button>
-                    <button class="init-btn" onclick="resetEngine()">初期化</button>
-                </div>
-                <div class="button-cluster-row button-cluster-row-4">
-                    <button class="sub-btn" onclick="runSub(1)">実行1</button>
-                    <button class="sub-btn" onclick="runSub(2)">実行2</button>
-                    <button class="import-btn" onclick="openImportModal()">インポート</button>
-                    <button class="settings-btn" onclick="openSettingsModal()">設定</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 右カラム：メモリ（縦いっぱい） -->
-        <div class="memory-column">
-            <div class="memory-header">
-                <div class="memory-header-top">
-                    <div style="font-size: 14px; color: #bbb; font-weight: bold;">メモリ</div>
-                    <div class="header-actions">
-                        <button class="small-tool-btn" onclick="openPopupWindow('memory')" title="メモリを別ウィンドウで開く">別窓</button>
+                    <div id="func-code-container" class="editor-container func-editor-container">
+                        <div id="func-line-numbers" class="line-numbers func-line-numbers"></div>
+                        <div id="func-code-editor-body" class="editor-body">
+                            <div id="func-code-match-highlight" class="match-highlight-layer"></div>
+                            <div id="func-code-highlight" class="highlight-layer"></div>
+                            <textarea id="func-code" class="code-textarea" spellcheck="false" placeholder="ここにユーザー定義関数 (fun 関数名(引数...) 〜 end) を定義..."></textarea>
+                        </div>
                     </div>
-                </div>
-                <div class="memory-inputs">
-                    <input type="text" id="manual-mem-name" placeholder="名前 (a, b[])" title="変数名または配列名">
-                    <input type="text" id="manual-mem-val" placeholder="値 (12, [a,b])" title="設定する値">
-                    <button class="set-mem-btn" onclick="setManualMemory()">SET</button>
-                </div>
-            </div>
-            <div id="memory" class="memory-container">
-                <div class="memory-empty">メモリは空です</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- インポートモーダル（縦4段・同種横並び） -->
-    <div id="import-modal" class="modal-overlay hidden" onclick="handleImportModalOverlayClick(event)">
-        <div class="modal-box import-modal-box">
-            <div class="modal-header">
-                <div class="import-header-title">
-                    <h3>ファイルインポート (画像・音声・フォント・テキスト)</h3>
-                    <button class="small-tool-btn import-all-btn" onclick="triggerAssetFileInput('all')">＋ まとめて選択 (自動判別)</button>
-                    <input type="file" id="asset-file-all" class="hidden" multiple onchange="handleAssetFilesSelected(this.files, 'auto'); this.value='';">
-                </div>
-                <button class="modal-close-btn" onclick="closeImportModal()">×</button>
-            </div>
-
-            <div class="modal-body import-modal-body" id="import-drop-zone">
-                <!-- 1段目：画像 -->
-                <div class="asset-tier">
-                    <div class="asset-tier-header">
-                        <span class="asset-tier-title">1. 画像 <small id="count-asset-image">(0)</small></span>
-                        <button class="small-tool-btn" onclick="triggerAssetFileInput('image')">＋ 画像を追加</button>
-                        <input type="file" id="asset-file-image" class="hidden" accept="image/*" multiple onchange="handleAssetFilesSelected(this.files, 'image'); this.value='';">
-                    </div>
-                    <div id="asset-list-image" class="asset-row-list">
-                        <div class="asset-empty">インポートされた画像はありません (例: thonk.png)</div>
-                    </div>
-                </div>
-
-                <!-- 2段目：音声 -->
-                <div class="asset-tier">
-                    <div class="asset-tier-header">
-                        <span class="asset-tier-title">2. 音声 <small id="count-asset-audio">(0)</small></span>
-                        <button class="small-tool-btn" onclick="triggerAssetFileInput('audio')">＋ 音声を追加</button>
-                        <input type="file" id="asset-file-audio" class="hidden" accept="audio/*" multiple onchange="handleAssetFilesSelected(this.files, 'audio'); this.value='';">
-                    </div>
-                    <div id="asset-list-audio" class="asset-row-list">
-                        <div class="asset-empty">インポートされた音声はありません (例: pop.wav)</div>
-                    </div>
-                </div>
-
-                <!-- 3段目：フォント -->
-                <div class="asset-tier">
-                    <div class="asset-tier-header">
-                        <span class="asset-tier-title">3. フォント <small id="count-asset-font">(0)</small></span>
-                        <button class="small-tool-btn" onclick="triggerAssetFileInput('font')">＋ フォントを追加</button>
-                        <input type="file" id="asset-file-font" class="hidden" accept=".ttf,.otf,.woff,.woff2" multiple onchange="handleAssetFilesSelected(this.files, 'font'); this.value='';">
-                    </div>
-                    <div id="asset-list-font" class="asset-row-list">
-                        <div class="asset-empty">インポートされたフォントはありません (.ttf等 / 拡張子なしで指定可)</div>
-                    </div>
-                </div>
-
-                <!-- 4段目：テキスト -->
-                <div class="asset-tier">
-                    <div class="asset-tier-header">
-                        <span class="asset-tier-title">4. テキスト <small id="count-asset-text">(0)</small></span>
-                        <button class="small-tool-btn" onclick="triggerAssetFileInput('text')">＋ テキストを追加</button>
-                        <input type="file" id="asset-file-text" class="hidden" accept=".txt,.csv,.json,.md,.log,.casic,text/*" multiple onchange="handleAssetFilesSelected(this.files, 'text'); this.value='';">
-                    </div>
-                    <div id="asset-list-text" class="asset-row-list">
-                        <div class="asset-empty">インポートされたテキストはありません (.txt, .csv, .json等)</div>
+                    <!-- 関数画面用の予測変換バー -->
+                    <div id="func-suggest-bar" class="suggest-bar">
+                        <span class="suggest-placeholder">予測変換: 文字を入力すると候補が表示されます (Tabで選択 / Tab+数字で直接指定)</span>
                     </div>
                 </div>
             </div>
 
-            <div class="modal-footer">
-                <span class="setting-save-note">※この画面にファイルをドラッグ＆ドロップして追加することもできます</span>
-                <div style="display:flex; gap:8px;">
-                    <button class="small-tool-btn" onclick="clearAllImportedAssets()">すべて削除</button>
-                    <button class="modal-ok-btn" onclick="closeImportModal()">閉じる</button>
-                </div>
-            </div>
-        </div>
-    </div>
+            <!-- ③ インポート画面タブ（縦4段・同種横並び） -->
+            <div id="tab-pane-import" class="tab-pane hidden">
+                <div class="import-tab-layout">
+                    <div class="import-tab-header">
+                        <div class="import-header-title">
+                            <h3>ファイルインポート (画像・音声・フォント・テキスト)</h3>
+                            <button class="small-tool-btn import-all-btn" onclick="triggerAssetFileInput('all')">＋ まとめて選択 (自動判別)</button>
+                            <input type="file" id="asset-file-all" class="hidden" multiple onchange="handleAssetFilesSelected(this.files, 'auto'); this.value='';">
+                        </div>
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <span class="setting-save-note">※この画面にファイルをドラッグ＆ドロップして追加できます</span>
+                            <button class="small-tool-btn" onclick="clearAllImportedAssets()">すべて削除</button>
+                        </div>
+                    </div>
 
-    <!-- 設定モーダル -->
-    <div id="settings-modal" class="modal-overlay hidden" onclick="handleModalOverlayClick(event)">
-        <div class="modal-box">
-            <div class="modal-header">
-                <h3>エディタ設定</h3>
-                <button class="modal-close-btn" onclick="closeSettingsModal()">×</button>
+                    <div class="import-modal-body" id="import-drop-zone">
+                        <!-- 1段目：画像 -->
+                        <div class="asset-tier">
+                            <div class="asset-tier-header">
+                                <span class="asset-tier-title">1. 画像 <small id="count-asset-image">(0)</small></span>
+                                <button class="small-tool-btn" onclick="triggerAssetFileInput('image')">＋ 画像を追加</button>
+                                <input type="file" id="asset-file-image" class="hidden" accept="image/*" multiple onchange="handleAssetFilesSelected(this.files, 'image'); this.value='';">
+                            </div>
+                            <div id="asset-list-image" class="asset-row-list">
+                                <div class="asset-empty">インポートされた画像はありません (例: thonk.png)</div>
+                            </div>
+                        </div>
+
+                        <!-- 2段目：音声 -->
+                        <div class="asset-tier">
+                            <div class="asset-tier-header">
+                                <span class="asset-tier-title">2. 音声 <small id="count-asset-audio">(0)</small></span>
+                                <button class="small-tool-btn" onclick="triggerAssetFileInput('audio')">＋ 音声を追加</button>
+                                <input type="file" id="asset-file-audio" class="hidden" accept="audio/*" multiple onchange="handleAssetFilesSelected(this.files, 'audio'); this.value='';">
+                            </div>
+                            <div id="asset-list-audio" class="asset-row-list">
+                                <div class="asset-empty">インポートされた音声はありません (例: pop.wav)</div>
+                            </div>
+                        </div>
+
+                        <!-- 3段目：フォント -->
+                        <div class="asset-tier">
+                            <div class="asset-tier-header">
+                                <span class="asset-tier-title">3. フォント <small id="count-asset-font">(0)</small></span>
+                                <button class="small-tool-btn" onclick="triggerAssetFileInput('font')">＋ フォントを追加</button>
+                                <input type="file" id="asset-file-font" class="hidden" accept=".ttf,.otf,.woff,.woff2" multiple onchange="handleAssetFilesSelected(this.files, 'font'); this.value='';">
+                            </div>
+                            <div id="asset-list-font" class="asset-row-list">
+                                <div class="asset-empty">インポートされたフォントはありません (.ttf等 / 拡張子なしで指定可)</div>
+                            </div>
+                        </div>
+
+                        <!-- 4段目：テキスト -->
+                        <div class="asset-tier">
+                            <div class="asset-tier-header">
+                                <span class="asset-tier-title">4. テキスト <small id="count-asset-text">(0)</small></span>
+                                <button class="small-tool-btn" onclick="triggerAssetFileInput('text')">＋ テキストを追加</button>
+                                <input type="file" id="asset-file-text" class="hidden" accept=".txt,.csv,.json,.md,.log,.casic,text/*" multiple onchange="handleAssetFilesSelected(this.files, 'text'); this.value='';">
+                            </div>
+                            <div id="asset-list-text" class="asset-row-list">
+                                <div class="asset-empty">インポートされたテキストはありません (.txt, .csv, .json等)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="modal-body">
-                <div class="setting-item">
-                    <label for="setting-tab-spaces">Tabキーのインデントスペース数</label>
-                    <input type="number" id="setting-tab-spaces" min="1" max="16" value="4">
-                </div>
-                <div class="setting-item">
-                    <label for="setting-auto-indent">改行時の自動インデント</label>
-                    <input type="checkbox" id="setting-auto-indent" checked>
-                </div>
-                <div class="setting-item">
-                    <label for="setting-auto-paren">「(」入力時の自動閉じ括弧「)」</label>
-                    <input type="checkbox" id="setting-auto-paren" checked>
-                </div>
-                <div class="setting-item">
-                    <label for="setting-auto-bracket">「[」入力時の自動閉じ括弧「]」</label>
-                    <input type="checkbox" id="setting-auto-bracket" checked>
-                </div>
-                <div class="setting-item">
-                    <label for="setting-auto-quote">「"」「'」入力時の自動閉じクォート</label>
-                    <input type="checkbox" id="setting-auto-quote" checked>
+
+            <!-- ④ 設定画面タブ -->
+            <div id="tab-pane-settings" class="tab-pane hidden">
+                <div class="settings-tab-layout">
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <h3>エディタ設定</h3>
+                            <span class="setting-save-note">※設定は変更すると自動的にブラウザへ保存されます</span>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="setting-item">
+                                <label for="setting-editor-font-size">Code / 関数欄の文字サイズ (px)</label>
+                                <input type="number" id="setting-editor-font-size" min="10" max="48" value="18">
+                            </div>
+                            <div class="setting-item">
+                                <label for="setting-tab-spaces">Tabキーのインデントスペース数</label>
+                                <input type="number" id="setting-tab-spaces" min="1" max="16" value="4">
+                            </div>
+                            <div class="setting-item">
+                                <label for="setting-auto-indent">改行時の自動インデント</label>
+                                <input type="checkbox" id="setting-auto-indent" checked>
+                            </div>
+                            <div class="setting-item">
+                                <label for="setting-auto-paren">「(」入力時の自動閉じ括弧「)」</label>
+                                <input type="checkbox" id="setting-auto-paren" checked>
+                            </div>
+                            <div class="setting-item">
+                                <label for="setting-auto-bracket">「[」入力時の自動閉じ括弧「]」</label>
+                                <input type="checkbox" id="setting-auto-bracket" checked>
+                            </div>
+                            <div class="setting-item">
+                                <label for="setting-auto-quote">「"」「'」入力時の自動閉じクォート</label>
+                                <input type="checkbox" id="setting-auto-quote" checked>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <span class="setting-save-note">※設定は自動的にブラウザへ保存されます</span>
-                <button class="modal-ok-btn" onclick="closeSettingsModal()">閉じる</button>
-            </div>
+
         </div>
     </div>
 
