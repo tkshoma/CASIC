@@ -100,7 +100,6 @@ function openPopupWindow(type) {
 
     popupWindows[type] = win;
     const initSize = popupFontSizes[type] || 16;
-    const tabSizeVal = (typeof editorSettings !== 'undefined' && editorSettings.tabSpaces) ? editorSettings.tabSpaces : 4;
 
     let extraControlsHtml = '';
     if (type === 'input') {
@@ -111,7 +110,7 @@ function openPopupWindow(type) {
     } else if (type === 'output') {
         extraControlsHtml =
             '<label class="wrap-label"><input type="checkbox" id="chk-wrap" checked> 端で折り返す</label>' +
-            '<button id="btn-copy-all-output" class="action-btn update-btn" title="全ページの出力をまとめてコピーします">コピー</button>' +
+            '<button id="btn-copy-all-output" class="action-btn update-btn" title="全ページの出力をまとめてコピーします">全ページを一括コピー</button>' +
             '<button id="btn-clear-output" class="action-btn clear-btn">出力クリア</button>' +
             '<span id="copy-msg" class="update-msg"></span>';
     } else if (type === 'cmdline') {
@@ -151,7 +150,7 @@ function openPopupWindow(type) {
         '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
         '<title>' + titles[type] + '</title>' +
         '<style>' +
-        ':root { --vscode-font: Menlo, Monaco, Consolas, "Courier New", monospace; --content-font-size: ' + initSize + 'px; --tab-size: ' + tabSizeVal + '; }' +
+        ':root { --vscode-font: Menlo, Monaco, Consolas, "Courier New", monospace; --content-font-size: ' + initSize + 'px; }' +
         'body { font-family: sans-serif; margin: 0; padding: 12px; background-color: #1e1e1e; color: #d4d4d4; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }' +
         '.toolbar { display: flex; align-items: center; justify-content: space-between; background: #252526; padding: 8px 12px; border: 1px solid #444; border-radius: 6px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }' +
         '.font-controls { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #ccc; }' +
@@ -177,11 +176,11 @@ function openPopupWindow(type) {
         '.page-indicator { display: inline-flex; align-items: center; gap: 4px; color: #ccc; font-family: var(--vscode-font); }' +
         '#page-num-input { width: 58px; padding: 2px 4px; background: #1e1e1e; color: #9cdcfe; border: 1px solid #555; border-radius: 3px; font-family: var(--vscode-font); font-size: 13px; text-align: center; font-weight: bold; }' +
         '.page-stats-info { font-family: var(--vscode-font); font-size: 12px; color: #aaa; }' +
-        '#popup-input-area { flex: 1; width: 100%; resize: none; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.5; white-space: pre-wrap; overflow: auto; outline: none; tab-size: var(--tab-size, 4); -moz-tab-size: var(--tab-size, 4); font-variant-ligatures: none; font-feature-settings: "palt" 0; }' +
+        '#popup-input-area { flex: 1; width: 100%; resize: none; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.5; white-space: pre-wrap; overflow: auto; outline: none; }' +
         '#popup-input-area:focus { border-color: #007acc; }' +
-        '.popup-output-area { flex: 1; width: 100%; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.45; white-space: pre-wrap; word-break: break-all; overflow: auto; tab-size: var(--tab-size, 4); -moz-tab-size: var(--tab-size, 4); font-variant-ligatures: none; font-feature-settings: "palt" 0; }' +
+        '.popup-output-area { flex: 1; width: 100%; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 12px; box-sizing: border-box; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.45; white-space: pre-wrap; word-break: break-all; overflow: auto; }' +
         '.popup-cmd-row { display: flex; gap: 8px; height: 90px; flex-shrink: 0; }' +
-        '#popup-cmdline-input { flex: 1; resize: none; background: #252526; color: #d4d4d4; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.4; outline: none; tab-size: var(--tab-size, 4); -moz-tab-size: var(--tab-size, 4); font-variant-ligatures: none; }' +
+        '#popup-cmdline-input { flex: 1; resize: none; background: #252526; color: #d4d4d4; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; font-family: var(--vscode-font); font-size: var(--content-font-size); line-height: 1.4; outline: none; }' +
         '#popup-cmdline-input:focus { border-color: #007acc; }' +
         '.error-text { color: #ff6b6b; }' +
         '.warn-text { color: #dcdcaa; }' +
@@ -191,7 +190,7 @@ function openPopupWindow(type) {
         '.memory-cell { width: 100%; min-height: 34px; display: flex; align-items: center; justify-content: space-between; box-sizing: border-box; padding: 6px 10px; border: 1px solid #555; background-color: #333; font-family: var(--vscode-font); border-radius: 4px; gap: 12px; flex-shrink: 0; overflow: hidden; }' +
         '.memory-cell.active { background-color: #094771; border-color: #00a8ff; color: white; }' +
         '.cell-name { color: #9cdcfe; font-size: 1em; font-weight: bold; flex-shrink: 0; }' +
-        '.cell-value { font-size: 1em; color: #ce9178; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; text-align: right; tab-size: var(--tab-size, 4); -moz-tab-size: var(--tab-size, 4); }' +
+        '.cell-value { font-size: 1em; color: #ce9178; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; text-align: right; }' +
         '.memory-array-box { width: 100%; max-height: 260px; display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid #555; background-color: #2b2b2c; font-family: var(--vscode-font); border-radius: 4px; flex-shrink: 0; overflow: hidden; }' +
         '.memory-array-box.active { border-color: #00a8ff; }' +
         '.memory-array-header { display: flex; justify-content: space-between; align-items: center; padding: 5px 10px; background-color: #383839; border-bottom: 1px solid #4a4a4a; flex-shrink: 0; }' +
@@ -200,7 +199,7 @@ function openPopupWindow(type) {
         '.memory-array-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 6px; display: flex; flex-direction: column; gap: 3px; }' +
         '.memory-array-item { display: flex; justify-content: space-between; align-items: center; padding: 3px 6px; background-color: #333; border-radius: 2px; font-size: 0.95em; gap: 8px; flex-shrink: 0; overflow: hidden; }' +
         '.array-item-idx { color: #888; font-size: 0.9em; flex-shrink: 0; }' +
-        '.array-item-val { color: #ce9178; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; text-align: right; tab-size: var(--tab-size, 4); -moz-tab-size: var(--tab-size, 4); }' +
+        '.array-item-val { color: #ce9178; white-space: nowrap; overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; text-align: right; }' +
         '.memory-empty { color: #666; text-align: center; margin-top: 30px; font-family: var(--vscode-font); }' +
         '</style></head><body>' +
         '<div class="toolbar">' +
@@ -301,7 +300,7 @@ function openPopupWindow(type) {
                 const fullText = getFullOutputText();
                 copyTextToClipboard(fullText, win, function() {
                     if (copyMsg) {
-                        copyMsg.textContent = '✓ 全' + fullText.length.toLocaleString() + '文字をコピーしました';
+                        copyMsg.textContent = '✓ 全' + fullText.length + '文字をコピーしました';
                         setTimeout(function() {
                             if (!win.closed && copyMsg) copyMsg.textContent = '';
                         }, 2000);

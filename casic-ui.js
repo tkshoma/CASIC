@@ -26,46 +26,30 @@ const editorSettings = {
     autoCloseQuote: true
 };
 
-// CSS変数 --tab-size を設定値に同期し、タブ文字(ASCII 9)の幅を揃える
-function applyTabSizeCssVar() {
-    const spaces = Math.max(1, Math.min(16, Number(editorSettings.tabSpaces) || 4));
-    document.documentElement.style.setProperty('--tab-size', String(spaces));
-    if (typeof popupWindows !== 'undefined') {
-        Object.keys(popupWindows).forEach(function(k) {
-            const w = popupWindows[k];
-            if (w && !w.closed && w.document && w.document.documentElement) {
-                w.document.documentElement.style.setProperty('--tab-size', String(spaces));
-            }
-        });
-    }
-}
-
 function loadEditorSettings() {
     try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed && typeof parsed === 'object') {
-                if (typeof parsed.tabSpaces === 'number' && parsed.tabSpaces >= 1 && parsed.tabSpaces <= 16) {
-                    editorSettings.tabSpaces = Math.trunc(parsed.tabSpaces);
-                }
-                if (typeof parsed.autoIndent === 'boolean') {
-                    editorSettings.autoIndent = parsed.autoIndent;
-                }
-                if (typeof parsed.autoCloseParen === 'boolean') {
-                    editorSettings.autoCloseParen = parsed.autoCloseParen;
-                }
-                if (typeof parsed.autoCloseBracket === 'boolean') {
-                    editorSettings.autoCloseBracket = parsed.autoCloseBracket;
-                }
-                if (typeof parsed.autoCloseQuote === 'boolean') {
-                    editorSettings.autoCloseQuote = parsed.autoCloseQuote;
-                }
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+            if (typeof parsed.tabSpaces === 'number' && parsed.tabSpaces >= 1 && parsed.tabSpaces <= 16) {
+                editorSettings.tabSpaces = Math.trunc(parsed.tabSpaces);
+            }
+            if (typeof parsed.autoIndent === 'boolean') {
+                editorSettings.autoIndent = parsed.autoIndent;
+            }
+            if (typeof parsed.autoCloseParen === 'boolean') {
+                editorSettings.autoCloseParen = parsed.autoCloseParen;
+            }
+            if (typeof parsed.autoCloseBracket === 'boolean') {
+                editorSettings.autoCloseBracket = parsed.autoCloseBracket;
+            }
+            if (typeof parsed.autoCloseQuote === 'boolean') {
+                editorSettings.autoCloseQuote = parsed.autoCloseQuote;
             }
         }
     } catch (e) {
     }
-    applyTabSizeCssVar();
 }
 
 function saveEditorSettings() {
@@ -73,7 +57,6 @@ function saveEditorSettings() {
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(editorSettings));
     } catch (e) {
     }
-    applyTabSizeCssVar();
 }
 
 function ensureBracketSettingItemExists() {
@@ -1216,13 +1199,16 @@ function clearCmdlineLog() {
     syncPopupCmdline();
 }
 
-// メイン画面の出力欄には純粋なプログラム出力のみを表示する（忠告文は混ぜない）
 function renderMainOutputBox() {
     const outDiv = document.getElementById('output');
     if (!outDiv) return;
     const buf = state.outputBuffer || '';
     if (buf.length > MAIN_OUTPUT_DISPLAY_LIMIT) {
-        outDiv.textContent = buf.slice(-5000);
+        outDiv.textContent =
+            '※出力が長いため末尾5,000文字のみ表示しています（全' +
+            buf.length.toLocaleString() +
+            '文字の確認・一括コピーはOutputの「別窓」を開いてください）\n\n' +
+            buf.slice(-5000);
     } else {
         outDiv.textContent = buf;
     }
@@ -1232,7 +1218,6 @@ function renderMainOutputBox() {
 function appendOutputAndErrors(output, errors, isReplace = false, currentLineDisplay = '-', warnings = [], echoCmd = null) {
     if (typeof state.outputBuffer !== 'string' || isReplace) {
         state.outputBuffer = '';
-        state.outputTruncateWarned = false;
         if (typeof outputPagination !== 'undefined') {
             outputPagination.currentPage = 1;
         }
@@ -1243,20 +1228,7 @@ function appendOutputAndErrors(output, errors, isReplace = false, currentLineDis
     }
 
     renderMainOutputBox();
-
-    // 出力が長すぎる場合の忠告文は出力欄ではなくコマンドライン側に表示する
-    const mergedWarnings = Array.isArray(warnings) ? warnings.slice() : [];
-    const bufLen = (state.outputBuffer || '').length;
-    if (bufLen > MAIN_OUTPUT_DISPLAY_LIMIT && !state.outputTruncateWarned) {
-        state.outputTruncateWarned = true;
-        mergedWarnings.push(
-            '※出力が長いためメイン画面では末尾5,000文字のみ表示しています（全' +
-            bufLen.toLocaleString() +
-            '文字の確認・コピーは出力の「別窓」を開いてください）'
-        );
-    }
-
-    appendCmdlineMessages(errors, mergedWarnings, echoCmd);
+    appendCmdlineMessages(errors, warnings, echoCmd);
 
     const nextLineLabel = (state.pc >= 0 && state.pc < getMainCodeLinesArray().length) ? (state.pc + 1) : '-';
     const statsEl = document.getElementById('exec-stats');
@@ -1315,7 +1287,6 @@ function setManualMemory() {
 
 function clearOutputOnly() {
     state.outputBuffer = '';
-    state.outputTruncateWarned = false;
     if (typeof outputPagination !== 'undefined') {
         outputPagination.currentPage = 1;
         outputPagination.totalPages = 1;
@@ -1332,7 +1303,6 @@ function resetEngine() {
     state.callStack = [];
     state.funcOutputBuffer = '';
     state.outputBuffer = '';
-    state.outputTruncateWarned = false;
     state.forStates = {};
     state.inputPtr = 0;
     state.rngSeed = null;
@@ -1415,7 +1385,6 @@ window.onload = function() {
     initSettingsModalEvents();
 
     state.outputBuffer = '';
-    state.outputTruncateWarned = false;
 
     document.getElementById('input-data').value = [
         '3',
@@ -1451,7 +1420,7 @@ window.onload = function() {
     document.getElementById('cmdline-input').value = 'cont';
 
     document.getElementById('sub-code1').value = [
-        '# 大量出力（5000文字改ページ＆コピー確認用：約3万文字出力）',
+        '# 大量出力（5000文字改ページ＆一括コピー確認用：約3万文字出力）',
         'out rep("0123456789ABCDEF", 2000)'
     ].join('\n');
 
