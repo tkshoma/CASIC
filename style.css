@@ -1,5 +1,6 @@
 :root {
     --vscode-font: Menlo, Monaco, Consolas, "Courier New", monospace;
+    --tab-size: 4;
 }
 
 body {
@@ -228,6 +229,10 @@ body {
     overflow-y: auto;
     overflow-x: auto;
     white-space: pre;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
+    font-feature-settings: "palt" 0;
 }
 .highlight-layer {
     color: #d4d4d4;
@@ -267,6 +272,9 @@ body {
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
 }
 .cmdline-input-row {
     display: flex;
@@ -286,6 +294,9 @@ body {
     font-size: 13px;
     line-height: 1.35;
     outline: none;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
 }
 .cmdline-input:focus {
     border-color: #007acc;
@@ -357,6 +368,11 @@ button.cmdline-run-btn:hover {
     margin: 0;
     min-height: 0;
     overflow-y: auto;
+    white-space: pre-wrap;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
+    font-feature-settings: "palt" 0;
 }
 #input-data:focus {
     outline: none;
@@ -378,6 +394,10 @@ button.cmdline-run-btn:hover {
     word-break: break-all;
     margin: 0;
     box-sizing: border-box;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
+    font-variant-ligatures: none;
+    font-feature-settings: "palt" 0;
 }
 
 /* 中央4段目：ボタン群 */
@@ -531,6 +551,8 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     min-width: 0;
     text-align: right;
     scrollbar-width: thin;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
 }
 .cell-value::-webkit-scrollbar { height: 4px; }
 .cell-value::-webkit-scrollbar-thumb { background-color: #666; border-radius: 2px; }
@@ -597,6 +619,8 @@ button.set-mem-btn:hover { background-color: #b36e32; }
     min-width: 0;
     text-align: right;
     scrollbar-width: thin;
+    tab-size: var(--tab-size, 4);
+    -moz-tab-size: var(--tab-size, 4);
 }
 .array-item-val::-webkit-scrollbar { height: 4px; }
 .array-item-val::-webkit-scrollbar-thumb { background-color: #666; border-radius: 2px; }
@@ -711,7 +735,7 @@ button.modal-ok-btn {
     background-color: #007acc;
 }
 
-/* インポートモーダル専用（画面全体よりほんの少し小さい特大サイズ・縦4段均等・横並び固定サイズ） */
+/* インポートモーダル専用 */
 .import-modal-box {
     width: 96vw;
     max-width: 96vw;
@@ -749,7 +773,6 @@ button.import-all-btn:hover {
     outline-offset: -6px;
 }
 
-/* 縦4段：高さを均等4分割し、中身の画像サイズで段が広がらないよう厳密に固定 */
 .asset-tier {
     flex: 1 1 0;
     min-height: 0;
@@ -780,7 +803,6 @@ button.import-all-btn:hover {
     font-weight: normal;
 }
 
-/* 同じ種類のアセットを横に並べるコンテナ */
 .asset-row-list {
     flex: 1 1 0;
     min-height: 0;
@@ -813,7 +835,6 @@ button.import-all-btn:hover {
     font-family: var(--vscode-font);
 }
 
-/* 各アセットカード：横幅180px・高さ100%に完全固定 */
 .asset-card {
     width: 180px;
     min-width: 180px;
@@ -840,7 +861,6 @@ button.import-all-btn:hover {
     flex-shrink: 0;
 }
 
-/* 名前変更用の直接入力ボックス */
 .asset-name-input {
     flex: 1;
     min-width: 0;
@@ -882,7 +902,6 @@ button.asset-del-btn:hover {
     color: #fff;
 }
 
-/* プレビュー枠 */
 .asset-preview-box {
     position: relative;
     flex: 1 1 0;
