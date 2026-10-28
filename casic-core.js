@@ -113,7 +113,6 @@ function isFloatString(str) {
     return dotCount === 1 && digitCount >= 1;
 }
 
-// 改訂仕様："inf", "-inf", "∞", "-∞" を数値として判定
 function isInfinityString(str) {
     if (!str) return false;
     const lower = cleanText(str).toLowerCase();
@@ -224,6 +223,7 @@ const FUNCTION_ALIASES = {
     'c_lcm': 'lcm',
     'c_base': 'base',
     'c_clamp': 'clamp',
+    'c_dist': 'dist',
     'b_and': 'band',
     'b_or': 'bor',
     'b_xor': 'bxor',
@@ -259,10 +259,9 @@ const FUNCTION_ALIASES = {
     's_regex': 'regex',
     's_if': 'if',
     's_squeeze': 'squeeze',
+    's_between_get': 'between_get',
     's_between_replace': 'between_replace',
     's_between_list': 'between_list',
-    'between': 'between_list',
-    's_between': 'between_list',
     's_unescape': 'unescape',
     's_at': 'at',
     'l_at': 'at',
@@ -303,7 +302,7 @@ const COMMAND_KEYWORDS = new Set([
     'seed', 'rename', 'stop', 'return', 'fun', 'wait', 'js',
     'g_size', 'g_smooth', 'g_clear', 'g_line', 'g_poly', 'g_rect', 'g_circle', 'g_image', 'g_text',
     'a_play', 'a_stop',
-    'cont', 'run', 'goto', 'step'
+    'cont', 'run', 'goto', 'step', 'reset'
 ]);
 
 const BUILTIN_FUNCTION_NAMES = new Set([
@@ -311,7 +310,8 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'abs', 'c_abs', 'not', 'c_not', 'sqrt', 'c_sqrt',
     'round', 'c_round', 'floor', 'c_floor', 'ceil', 'celi', 'c_ceil', 'trunc', 'c_trunc',
     'min', 'c_min', 'max', 'c_max', 'sum', 'c_sum', 'gcd', 'c_gcd', 'lcm', 'c_lcm',
-    'base', 'c_base', 'clamp', 'c_clamp',
+    'base', 'c_base', 'clamp', 'c_clamp', 'dist', 'c_dist',
+    'sin', 'cos', 'tan', 'atan2',
     'band', 'b_and', 'bor', 'b_or', 'bxor', 'b_xor', 'bnot', 'b_not',
     'rand', 'rand.', 'hrand', 'randh', 'hrand.', 'randh.',
     'hash', 'h_hash', 'md5', 'h_md5', 'sha256', 'h_sha256',
@@ -323,8 +323,9 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'split', 's_split', 'rep', 's_rep', 'trim', 's_trim',
     'upper', 's_upper', 'lower', 's_lower', 'regex', 's_regex', 'if', 's_if',
     'squeeze', 's_squeeze',
+    'between_get', 's_between_get',
     'between_replace', 's_between_replace',
-    'between_list', 's_between_list', 'between', 's_between',
+    'between_list', 's_between_list',
     'unescape', 's_unescape',
     'at', 's_at', 'l_at', 'd_at',
     'join', 'l_join', 'grid', 'l_grid', 'flat', 'l_flat', 'bs', 'l_bs', 'uniq', 'l_uniq',

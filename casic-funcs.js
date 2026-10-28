@@ -2,6 +2,43 @@
 // 組み込み関数 (1章〜9章) & 関数呼び出しディスパッチ
 // ==========================================
 
+function formatCleanMathResult(val) {
+    if (!Number.isFinite(val)) return formatFloatStorage(val);
+    const cleaned = Number(val.toPrecision(15));
+    if (Object.is(cleaned, -0)) return "0";
+    return String(cleaned);
+}
+
+function executeTrigFunction(mode, degRaw) {
+    const deg = parseCasicNumber(degRaw).num;
+    if (!Number.isFinite(deg)) return "0";
+
+    const norm360 = ((deg % 360) + 360) % 360;
+    const norm180 = ((deg % 180) + 180) % 180;
+    const rad = deg * (Math.PI / 180);
+
+    if (mode === 'sin') {
+        if (norm180 === 0) return "0";
+        if (norm360 === 90) return "1";
+        if (norm360 === 270) return "-1";
+        return formatCleanMathResult(Math.sin(rad));
+    }
+    if (mode === 'cos') {
+        if (norm360 === 0) return "1";
+        if (norm360 === 180) return "-1";
+        if (norm360 === 90 || norm360 === 270) return "0";
+        return formatCleanMathResult(Math.cos(rad));
+    }
+    if (mode === 'tan') {
+        if (norm180 === 0) return "0";
+        if (norm180 === 45) return "1";
+        if (norm180 === 135) return "-1";
+        if (norm180 === 90) return "inf";
+        return formatCleanMathResult(Math.tan(rad));
+    }
+    return "0";
+}
+
 function executeSqueezeFunction(args) {
     if (args.length < 2) return args[0] ? toDisplayString(args[0]) : "";
     const s1 = toDisplayString(args[0]);
@@ -43,6 +80,104 @@ function executeSqueezeFunction(args) {
         }
     }
     return out;
+}
+
+// 文字列s1内の s2 と s3 の対応ペアを抽出する共通ヘルパー
+function extractBetweenPairs(s1, s2, s3) {
+    if (s2 === '' || s3 === '') return [];
+
+    if (s2 === s3) {
+        const positions = [];
+        let pos = 0;
+        while (pos <= s1.length - s2.length) {
+            const idx = s1.indexOf(s2, pos);
+            if (idx === -1) break;
+            positions.push(idx);
+            pos = idx + s2.length;
+        }
+        const samePairs = [];
+        for (let i = 0; i + 1 < positions.length; i += 2) {
+            samePairs.push({
+                openStart: positions[i],
+                openEnd: positions[i] + s2.length,
+                closeStart: positions[i + 1],
+                closeEnd: positions[i + 1] + s3.length,
+                children: [],
+                parent: null
+            });
+        }
+        return samePairs;
+    }
+
+    const openStack = [];
+    const pairs = [];
+    let i = 0;
+
+    while (i < s1.length) {
+        const matchOpen = s1.startsWith(s2, i);
+        const matchClose = s1.startsWith(s3, i);
+
+        if (matchOpen && matchClose) {
+            if (s2.length >= s3.length) {
+                openStack.push({ start: i, end: i + s2.length });
+                i += s2.length;
+            } else {
+                if (openStack.length > 0) {
+                    const op = openStack.pop();
+                    pairs.push({ openStart: op.start, openEnd: op.end, closeStart: i, closeEnd: i + s3.length, children: [], parent: null });
+                }
+                i += s3.length;
+            }
+        } else if (matchOpen) {
+            openStack.push({ start: i, end: i + s2.length });
+            i += s2.length;
+        } else if (matchClose) {
+            if (openStack.length > 0) {
+                const op = openStack.pop();
+                pairs.push({ openStart: op.start, openEnd: op.end, closeStart: i, closeEnd: i + s3.length, children: [], parent: null });
+            }
+            i += s3.length;
+        } else {
+            i++;
+        }
+    }
+
+    return pairs;
+}
+
+// 7章: between_get(s1, s2, s3, n) 関数ヘルパー
+// n>0: 前から数えてn番目のs2とそれに対応するs3の間にある文字列を返す。
+// n<0: 後ろから数えて|n|番目のs3とそれに対応するs2の間にある文字列を返す。
+function executeBetweenGetFunction(args) {
+    if (args.length < 3) return "";
+    const s1 = toDisplayString(args[0]);
+    const s2 = toDisplayString(args[1]);
+    const s3 = toDisplayString(args[2]);
+    const n = (args.length >= 4 && cleanText(args[3]) !== '')
+        ? Math.trunc(parseCasicNumber(args[3]).num)
+        : 1;
+
+    if (s2 === '' || s3 === '' || n === 0) return "";
+
+    const pairs = extractBetweenPairs(s1, s2, s3);
+    if (pairs.length === 0) return "";
+
+    if (n > 0) {
+        pairs.sort(function(a, b) {
+            return a.openStart - b.openStart;
+        });
+        if (n > pairs.length) return "";
+        const target = pairs[n - 1];
+        return s1.slice(target.openEnd, target.closeStart);
+    } else {
+        pairs.sort(function(a, b) {
+            return b.closeStart - a.closeStart;
+        });
+        const idx = Math.abs(n) - 1;
+        if (idx >= pairs.length) return "";
+        const target = pairs[idx];
+        return s1.slice(target.openEnd, target.closeStart);
+    }
 }
 
 // 7章: between_replace(s1, s2, s3, s4) 関数ヘルパー
@@ -90,56 +225,13 @@ function executeBetweenListFunction(args) {
 
     if (s2 === s3) {
         if (n !== 1 && n !== -1) return [];
-        const positions = [];
-        let pos = 0;
-        while (pos <= s1.length - s2.length) {
-            const idx = s1.indexOf(s2, pos);
-            if (idx === -1) break;
-            positions.push(idx);
-            pos = idx + s2.length;
-        }
-        const results = [];
-        for (let i = 0; i + 1 < positions.length; i += 2) {
-            const startIdx = positions[i] + s2.length;
-            const endIdx = positions[i + 1];
-            results.push(s1.slice(startIdx, endIdx));
-        }
-        return results;
+        const samePairs = extractBetweenPairs(s1, s2, s3);
+        return samePairs.map(function(p) {
+            return s1.slice(p.openEnd, p.closeStart);
+        });
     }
 
-    const openStack = [];
-    const pairs = [];
-    let i = 0;
-
-    while (i < s1.length) {
-        const matchOpen = s1.startsWith(s2, i);
-        const matchClose = s1.startsWith(s3, i);
-
-        if (matchOpen && matchClose) {
-            if (s2.length >= s3.length) {
-                openStack.push({ start: i, end: i + s2.length });
-                i += s2.length;
-            } else {
-                if (openStack.length > 0) {
-                    const op = openStack.pop();
-                    pairs.push({ openStart: op.start, openEnd: op.end, closeStart: i, closeEnd: i + s3.length, children: [], parent: null });
-                }
-                i += s3.length;
-            }
-        } else if (matchOpen) {
-            openStack.push({ start: i, end: i + s2.length });
-            i += s2.length;
-        } else if (matchClose) {
-            if (openStack.length > 0) {
-                const op = openStack.pop();
-                pairs.push({ openStart: op.start, openEnd: op.end, closeStart: i, closeEnd: i + s3.length, children: [], parent: null });
-            }
-            i += s3.length;
-        } else {
-            i++;
-        }
-    }
-
+    const pairs = extractBetweenPairs(s1, s2, s3);
     if (pairs.length === 0) return [];
 
     pairs.sort(function(a, b) {
@@ -211,7 +303,6 @@ function executeUnescapeFunction(args) {
         throw new Error('unescape関数の第2引数には "all", "unicode", "html", "url" のいずれかを指定してください');
     }
 
-    // 1. Unicodeエスケープの復元 (\uXXXX および \u{XXXXX})
     if (type === 'all' || type === 'unicode') {
         result = result.replace(/\\u\{([0-9a-fA-F]+)\}/g, function(_, hex) {
             const code = parseInt(hex, 16);
@@ -223,7 +314,6 @@ function executeUnescapeFunction(args) {
         });
     }
 
-    // 2. HTMLエスケープの復元 (&apos;, &omega;, &#123;, &#x1F600; など)
     if (type === 'all' || type === 'html') {
         const decoder = document.createElement('textarea');
         result = result.replace(/&(#?[a-zA-Z0-9]+);/g, function(fullMatch, entityBody) {
@@ -233,7 +323,6 @@ function executeUnescapeFunction(args) {
         });
     }
 
-    // 3. URLエスケープの復元 (%E3%81%82 など)
     if (type === 'all' || type === 'url') {
         result = result.replace(/(?:%[0-9a-fA-F]{2})+/g, function(encodedSeq) {
             try {
@@ -444,6 +533,25 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         if (compareCasicNumericSort(v1, hi) > 0) return hi;
         return v1;
     }
+    if (funcNameLower === 'dist') {
+        if (args.length < 2) throw new Error('dist関数には少なくとも2つの引数 dist(n1, n2, [n3, n4]) が必要です');
+        const x1 = parseCasicNumber(args[0]).num;
+        const y1 = parseCasicNumber(args[1]).num;
+        const x2 = (args.length >= 3 && cleanText(args[2]) !== '') ? parseCasicNumber(args[2]).num : 0;
+        const y2 = (args.length >= 4 && cleanText(args[3]) !== '') ? parseCasicNumber(args[3]).num : 0;
+        return formatCleanMathResult(Math.hypot(x2 - x1, y2 - y1));
+    }
+    if (funcNameLower === 'sin' || funcNameLower === 'cos' || funcNameLower === 'tan') {
+        if (args.length < 1) throw new Error(funcNameLower + '関数には1つの引数（角度）が必要です');
+        return executeTrigFunction(funcNameLower, args[0]);
+    }
+    if (funcNameLower === 'atan2') {
+        if (args.length < 2) throw new Error('atan2関数には2つの引数 atan2(x, y) が必要です');
+        const x = parseCasicNumber(args[0]).num;
+        const y = parseCasicNumber(args[1]).num;
+        const deg = Math.atan2(y, x) * (180 / Math.PI);
+        return formatCleanMathResult(deg);
+    }
 
     // 3. ビット演算の関数
     if (funcNameLower === 'band' || funcNameLower === 'bor' || funcNameLower === 'bxor') {
@@ -619,7 +727,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         if (args.length === 0) return {};
         const target = resolveArgAsCollectionOrValue(argResults[0]);
 
-        // 改訂仕様：引数が1つのとき、各文字または各要素の出現回数を集計した辞書を返す
         if (args.length === 1) {
             const freqDict = {};
             if (Array.isArray(target)) {
@@ -645,7 +752,6 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
             return freqDict;
         }
 
-        // 引数が2つのとき：x中に出てくるsの数を返す
         const needle = args[1];
         if (Array.isArray(target)) {
             let c = 0;
@@ -730,6 +836,9 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
     }
     if (funcNameLower === 'squeeze') {
         return executeSqueezeFunction(args);
+    }
+    if (funcNameLower === 'between_get') {
+        return executeBetweenGetFunction(args);
     }
     if (funcNameLower === 'between_replace') {
         return executeBetweenReplaceFunction(args);
