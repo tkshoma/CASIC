@@ -20,6 +20,8 @@
                 <button id="tab-btn-import" class="vtab-btn" onclick="switchVirtualTab('import')">インポート</button>
                 <button id="tab-btn-settings" class="vtab-btn" onclick="switchVirtualTab('settings')">設定</button>
             </div>
+            <!-- Canvas表示切り替えボタン（右端） -->
+            <button class="small-tool-btn" style="padding: 4px 12px; font-weight: bold; background-color: #007acc;" onclick="casicCanvas.toggleVisibility()">🎨 Canvas表示</button>
         </div>
 
         <!-- タブの中身コンテナ -->
@@ -336,14 +338,32 @@
         </div>
     </div>
 
+<!-- Canvas フローティングウィンドウ -->
+    <div id="canvas-floating-window" class="floating-window hidden">
+        <div id="canvas-floating-header" class="floating-header">
+            <span id="canvas-title">Canvas (480x360)</span>
+            <!-- ▼ ここに全画面ボタンを追加しました ▼ -->
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button id="btn-canvas-fullscreen" class="small-tool-btn" style="padding: 2px 8px;" title="全画面表示 (Escで解除)">全画面</button>
+                <button class="modal-close-btn" style="width:24px; height:24px; font-size:18px;" onclick="casicCanvas.toggleVisibility()">×</button>
+            </div>
+        </div>
+        <div class="floating-body">
+            <canvas id="casic-main-canvas" width="480" height="360"></canvas>
+        </div>
+    </div>
+
     <!-- 分割されたJSファイルを順番に読み込む -->
+<!-- 分割されたJSファイルを順番に読み込む -->
     <script src="casic-core.js"></script>
     <script src="casic-math.js"></script>
     <script src="casic-expr.js"></script>
     <script src="casic-funcs.js"></script>
     <script src="casic-cmd.js"></script>
+    <script src="casic-flow.js"></script> <!-- ★これを追加★ -->
     <script src="casic-engine.js"></script>
     <script src="casic-assets.js"></script>
+    <script src="casic-canvas.js"></script>
     <script src="casic-popup.js"></script>
     <script src="casic-ui.js"></script>
 </body>

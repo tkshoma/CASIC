@@ -781,6 +781,50 @@ function executeJsCommand(restRaw) {
     fn();
 }
 
+function executeFetchCommand(restRaw) {
+    const parsed = parseCommandOptionAndTarget(restRaw);
+    const args = splitCommandTargetArgs(parsed.targetStr);
+    if (args.length < 2) throw new Error('fetch命令には代入先の変数とURLを指定してください');
+    
+    const varName = cleanText(args[0]);
+    if (!isValidVarIdentifier(varName)) {
+        throw new Error('fetch命令の代入先には有効な変数名を指定してください: ' + varName);
+    }
+    const urlStr = toDisplayString(evaluateExpression(args[1]));
+    
+    let isSync = true;
+    if (parsed.optStr !== null && parsed.optStr !== '') {
+        isSync = isCasicTruthy(evaluateExpression(parsed.optStr));
+    }
+
+    if (!isSync) {
+        fetch(urlStr).then(function(res) {
+            if (res.ok) return res.text();
+            return "";
+        }).then(function(text) {
+            setVar(varName, text);
+            if (typeof renderMemoryUI === 'function') renderMemoryUI();
+        }).catch(function(e) {
+            console.warn("Fetch (async) error:", e);
+        });
+        setVar(varName, "");
+    } else {
+        try {
+            state.warnings.push('[警告] fetch命令(同期) が実行されました。通信中は画面がフリーズします。');
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', urlStr, false);
+            xhr.send(null);
+            if (xhr.status === 200) {
+                setVar(varName, xhr.responseText);
+            } else {
+                setVar(varName, "");
+            }
+        } catch (e) {
+            setVar(varName, "");
+        }
+    }
+}
+
 // ==========================================
 // 4. 入出力の命令（in / charin / allin / resetin / out / put）
 // ==========================================
@@ -1161,6 +1205,24 @@ function executeStatement(stmtRaw, lineNum) {
         const cmdLower = normalizeCommandName(rawCmdLower);
         const rest = trimmed.slice(cmdLen);
         const restTrimmed = cleanText(rest);
+
+        // 7章・追加命令 (tick, frame, fetch)
+        if (cmdLower === 'tick' && (rest === '' || isSpaceChar(rest[0]))) {
+            if (restTrimmed !== '') return { output: '', error: 'tick命令に引数は指定できません', action: null };
+            state.lastTickTime = performance.now();
+            resetKeyTickState();
+            return { output: flushFunctionOutput(''), error: null, action: null };
+        }
+        if (cmdLower === 'frame' && (rest === '' || isSpaceChar(rest[0]))) {
+            if (restTrimmed !== '') return { output: '', error: 'frame命令に引数は指定できません', action: null };
+            state.lastFrameTime = performance.now();
+            // [TODO: ここでCanvasの描画更新（flush）を行う]
+            return { output: flushFunctionOutput(''), error: null, action: null };
+        }
+        if (cmdLower === 'fetch') {
+            executeFetchCommand(rest);
+            return { output: flushFunctionOutput(''), error: null, action: null };
+        }
 
         // コマンドライン専用命令 (cont, run, goto, step, reset)
         if (cmdLower === 'cont' && (rest === '' || isSpaceChar(rest[0]))) {
