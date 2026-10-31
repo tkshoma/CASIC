@@ -15,6 +15,33 @@ let currentActiveTab = 'code';
 
 const editorUpdateCallbacks = {};
 
+// 実行中の非同期プロセスを管理する状態フラグ
+let isExecutionRunning = false;
+
+// UI上の実行ボタンを「■ 停止」状態に切り替える関数
+function setExecutionUIMode(isRunning) {
+    isExecutionRunning = isRunning;
+    const mainRunBtn = document.querySelector('.button-cluster-row button:first-child');
+    if (isRunning) {
+        if (mainRunBtn) {
+            mainRunBtn.textContent = '■ 停止';
+            mainRunBtn.style.backgroundColor = '#b33939';
+        }
+    } else {
+        if (mainRunBtn) {
+            mainRunBtn.textContent = 'RUN';
+            mainRunBtn.style.backgroundColor = '';
+        }
+    }
+}
+
+// 停止リクエスト
+function abortCurrentExecution() {
+    if (isExecutionRunning) {
+        state.isAborting = true;
+    }
+}
+
 // ==========================================
 // 0. 仮想タブ切り替え制御 ＆ Code全画面表示切替
 // ==========================================
@@ -156,6 +183,19 @@ function saveEditorSettings() {
     } catch (e) {
     }
     applyEditorCssVars();
+}
+
+function ensureBracketSettingItemExists() {
+    if (document.getElementById('setting-auto-bracket')) return;
+    const parenChk = document.getElementById('setting-auto-paren');
+    if (!parenChk || !parenChk.parentElement || !parenChk.parentElement.parentElement) return;
+    const modalBody = parenChk.parentElement.parentElement;
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'setting-item';
+    itemDiv.innerHTML =
+        '<label for="setting-auto-bracket">「[」入力時の自動閉じ括弧「]」</label>' +
+        '<input type="checkbox" id="setting-auto-bracket" checked>';
+    modalBody.insertBefore(itemDiv, parenChk.parentElement.nextSibling);
 }
 
 function syncSettingsModalInputs() {
@@ -805,6 +845,7 @@ function renderSuggestBar() {
         const item = list[i];
         const isSel = (i === suggestState.selectedIndex);
         html += '<div class="suggest-item ' + item.colorClass + (isSel ? ' selected' : '') + '" ' +
+                'id="suggest-item-' + i + '" ' +
                 'onmousedown="handleSuggestItemMouseDown(event, ' + i + ')">' +
                 '<span class="suggest-idx">[' + (i + 1) + ']</span>' +
                 '<span>' + escapeHtml(item.display) + '</span>' +
@@ -1014,6 +1055,7 @@ function highlightCasic(text, cursorPos = -1) {
         let i = 0;
         let isExprStart = true;
         let isFirstWordInLine = true;
+        let isStmtStart = true;
         const lineMeta = blockMetaByLine[lineIdx];
 
         while (i < line.length) {
@@ -1028,6 +1070,7 @@ function highlightCasic(text, cursorPos = -1) {
                 i = end + 1;
                 isExprStart = false;
                 isFirstWordInLine = false;
+                isStmtStart = false;
                 continue;
             }
 
@@ -1039,6 +1082,7 @@ function highlightCasic(text, cursorPos = -1) {
                     i = end;
                     isExprStart = false;
                     isFirstWordInLine = false;
+                    isStmtStart = false;
                     continue;
                 }
             }
@@ -1054,6 +1098,7 @@ function highlightCasic(text, cursorPos = -1) {
                 i++;
                 isExprStart = true;
                 isFirstWordInLine = false;
+                isStmtStart = true;
                 continue;
             }
 
@@ -1062,6 +1107,7 @@ function highlightCasic(text, cursorPos = -1) {
                 i++;
                 isExprStart = false;
                 isFirstWordInLine = false;
+                isStmtStart = false;
                 continue;
             }
 
@@ -1070,6 +1116,7 @@ function highlightCasic(text, cursorPos = -1) {
                 i++;
                 isExprStart = true;
                 isFirstWordInLine = false;
+                isStmtStart = false;
                 continue;
             }
 
@@ -1078,6 +1125,7 @@ function highlightCasic(text, cursorPos = -1) {
                 i++;
                 isExprStart = true;
                 isFirstWordInLine = false;
+                isStmtStart = false;
                 continue;
             }
 
@@ -1097,6 +1145,9 @@ function highlightCasic(text, cursorPos = -1) {
                 const isFollowedByAssign = matchAssignmentOp(restAfterWord) !== null || restAfterWord.startsWith('[') || restAfterWord.startsWith('{');
                 const isFollowedByParen = restAfterWord.startsWith('(') || restAfterWord.startsWith('.(');
 
+                const wasStmtStart = isStmtStart;
+                isStmtStart = false;
+
                 if (isFirstWordInLine && lineMeta && !isFollowedByAssign) {
                     const isGlow = (activeGroupId !== -1 && lineMeta.groupId === activeGroupId);
                     const glowCSS = isGlow ? ' outline: 1px solid rgba(255,255,255,0.45); background-color: rgba(255,255,255,0.12); border-radius: 2px;' : '';
@@ -1115,7 +1166,7 @@ function highlightCasic(text, cursorPos = -1) {
 
                 isFirstWordInLine = false;
 
-                if (!isFollowedByAssign && COMMAND_KEYWORDS.has(lower) && (!isFollowedByParen || lower === 'if' || lower === 'elseif' || lower === 'for' || lower === 'while' || lower === 'break')) {
+                if (!isFollowedByAssign && COMMAND_KEYWORDS.has(lower) && (!isFollowedByParen || lower === 'if' || lower === 'elseif' || lower === 'for' || lower === 'while' || lower === 'break' || wasStmtStart)) {
                     result += '<span style="color: #569cd6; font-weight: bold;">' + escapeHtml(word) + '</span>';
                     isExprStart = true;
                 } else if (isFollowedByParen && (BUILTIN_FUNCTION_NAMES.has(lower) || Object.prototype.hasOwnProperty.call(state.functions, lower))) {
@@ -1138,6 +1189,7 @@ function highlightCasic(text, cursorPos = -1) {
             result += escapeHtml(ch);
             isExprStart = false;
             isFirstWordInLine = false;
+            isStmtStart = false;
             i++;
         }
         return result;
@@ -1370,7 +1422,6 @@ function setupEditor(id, isMain = false, isFuncEditor = false) {
     textarea.addEventListener('keydown', function(e) {
         if (e.isComposing) return;
 
-        // EscapeキーでCode全画面表示を解除できるようにする
         if (e.key === 'Escape' && isMain) {
             const codeCol = document.getElementById('code-column');
             if (codeCol && codeCol.classList.contains('code-fullscreen')) {
@@ -1388,7 +1439,6 @@ function setupEditor(id, isMain = false, isFuncEditor = false) {
             }
         }
 
-        // 0. Tabを押しながら数字キー (1〜9) を押した場合
         if (suggestState.isTabHeld && e.key >= '1' && e.key <= '9') {
             e.preventDefault();
             const numIdx = parseInt(e.key, 10) - 1;
@@ -1401,7 +1451,6 @@ function setupEditor(id, isMain = false, isFuncEditor = false) {
             return;
         }
 
-        // 1. Tabキー
         if (e.key === 'Tab') {
             e.preventDefault();
             suggestState.isTabHeld = true;
@@ -1439,7 +1488,6 @@ function setupEditor(id, isMain = false, isFuncEditor = false) {
 
         resetSuggestCycle();
 
-        // 2. Enterキーによる自動インデント
         if (e.key === 'Enter' && editorSettings.autoIndent) {
             e.preventDefault();
             const self = this;
@@ -1479,7 +1527,6 @@ function setupEditor(id, isMain = false, isFuncEditor = false) {
             return;
         }
 
-        // 3. `(` 入力時の自動閉じ括弧 `)`
         if (e.key === '(' && editorSettings.autoCloseParen) {
             e.preventDefault();
             const self = this;
@@ -1496,7 +1543,6 @@ function setupEditor(id, isMain = false, isFuncEditor = false) {
             return;
         }
 
-        // 3.5 `[` 入力時の自動閉じ括弧 `]`
         if (e.key === '[' && editorSettings.autoCloseBracket) {
             e.preventDefault();
             const self = this;
@@ -1513,7 +1559,6 @@ function setupEditor(id, isMain = false, isFuncEditor = false) {
             return;
         }
 
-        // 4. `"` または `'` 入力時の自動閉じクォート
         if ((e.key === '"' || e.key === "'") && editorSettings.autoCloseQuote) {
             e.preventDefault();
             const q = e.key;
@@ -1771,19 +1816,159 @@ function syncMainFunctions() {
     return allErrors;
 }
 
-function executeCommandLineString(cmdText) {
+// 実行を非同期関数（async function）でラップする
+async function runMainAsync() {
+    if (isExecutionRunning) {
+        abortCurrentExecution();
+        return;
+    }
+    isExecutionRunning = true;
+    setExecutionUIMode(true);
+
+    try {
+        resetEngine();
+        state.isStepMode = false;
+        const funcErrs = syncMainFunctions();
+        const code = document.getElementById('code').value;
+        const res = await executeCasicCodeAsync(code, 1, false);
+        appendOutputAndErrors(res.output, funcErrs.concat(res.errors), true, 'All', res.warnings);
+        if (typeof casicCanvas !== 'undefined') casicCanvas.flush();
+    } catch (e) {
+        appendCmdlineMessages(['実行エラー: ' + e.message], []);
+    } finally {
+        isExecutionRunning = false;
+        setExecutionUIMode(false);
+    }
+}
+
+async function stepMainAsync() {
+    if (isExecutionRunning) {
+        abortCurrentExecution();
+        return;
+    }
+    isExecutionRunning = true;
+    setExecutionUIMode(true);
+
+    try {
+        const funcErrs = syncMainFunctions();
+        const lines = getMainCodeLinesArray();
+        if (state.pc >= lines.length || state.pc < 0) {
+            state.pc = 0;
+            state.stepEvaluateBranch = false;
+        }
+        const lineIdx = state.pc;
+        state.warnings = [];
+        state.isStepMode = true;
+        const res = await runMainCodeSessionAsync({
+            endLineIdx: lines.length - 1,
+            maxSteps: 1
+        });
+        appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, lineIdx + 1, state.warnings);
+        if (typeof casicCanvas !== 'undefined') casicCanvas.flush();
+    } catch (e) {
+        appendCmdlineMessages(['ステップ実行エラー: ' + e.message], []);
+    } finally {
+        isExecutionRunning = false;
+        setExecutionUIMode(false);
+    }
+}
+
+async function runClickedLineAsync(lineIdx) {
+    if (isExecutionRunning) {
+        abortCurrentExecution();
+        return;
+    }
+    isExecutionRunning = true;
+    setExecutionUIMode(true);
+
+    try {
+        const funcErrs = syncMainFunctions();
+        const lines = getMainCodeLinesArray();
+        if (lineIdx < 0 || lineIdx >= lines.length) {
+            isExecutionRunning = false;
+            setExecutionUIMode(false);
+            return;
+        }
+        state.pc = lineIdx;
+        state.warnings = [];
+        const labelScan = buildLabelMap(lines, 1);
+        const cfStructure = buildControlFlowStructure(lines, 1, true);
+        const res = await executeLineWithControlFlowAsync(lineIdx, lines, 1, labelScan.labels, cfStructure, true);
+        const allErrors = funcErrs.concat(labelScan.errors, cfStructure.errors, res.errors);
+
+        if (res.nextLineIdx < lines.length && res.nextLineIdx !== lineIdx + 1) {
+            state.pc = res.nextLineIdx;
+            state.stepEvaluateBranch = res.nextEvalBranch;
+        }
+        appendOutputAndErrors(res.output, allErrors, false, lineIdx + 1, state.warnings);
+        if (typeof casicCanvas !== 'undefined') casicCanvas.flush();
+    } catch (e) {
+        appendCmdlineMessages(['行実行エラー: ' + e.message], []);
+    } finally {
+        isExecutionRunning = false;
+        setExecutionUIMode(false);
+    }
+}
+
+async function runSubAsync(num) {
+    if (isExecutionRunning) {
+        abortCurrentExecution();
+        return;
+    }
+    isExecutionRunning = true;
+    setExecutionUIMode(true);
+
+    try {
+        const funcErrs = syncMainFunctions();
+        const subEl = document.getElementById('sub-code' + num);
+        if (!subEl) return;
+        const code = subEl.value;
+        const res = await executeCasicCodeAsync(code, 1, true);
+        appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, 'Sub' + num, res.warnings);
+        if (typeof casicCanvas !== 'undefined') casicCanvas.flush();
+    } catch (e) {
+        appendCmdlineMessages(['サブ実行エラー: ' + e.message], []);
+    } finally {
+        isExecutionRunning = false;
+        setExecutionUIMode(false);
+    }
+}
+
+async function executeCommandLineStringAsync(cmdText) {
     const trimmed = cleanText(cmdText);
     if (trimmed === '') return;
-    const funcErrs = syncMainFunctions();
-    const res = executeCasicCode(cmdText, 1, true);
-    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, 'Cmd', res.warnings, trimmed);
+    
+    if (isExecutionRunning) {
+        abortCurrentExecution();
+        return;
+    }
+    isExecutionRunning = true;
+    setExecutionUIMode(true);
+
+    try {
+        const funcErrs = syncMainFunctions();
+        const res = await executeCasicCodeAsync(cmdText, 1, true);
+        appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, 'Cmd', res.warnings, trimmed);
+        if (typeof casicCanvas !== 'undefined') casicCanvas.flush();
+    } catch (e) {
+        appendCmdlineMessages(['コマンドライン実行エラー: ' + e.message], []);
+    } finally {
+        isExecutionRunning = false;
+        setExecutionUIMode(false);
+    }
 }
 
 function runCommandLineFromMain() {
     const inputEl = document.getElementById('cmdline-input');
     if (!inputEl) return;
-    executeCommandLineString(inputEl.value);
+    executeCommandLineStringAsync(inputEl.value);
 }
+
+// HTMLのonclick等から呼び出されるラッパー
+function runMain() { runMainAsync(); }
+function stepMain() { stepMainAsync(); }
+function runClickedLine(idx) { runClickedLineAsync(idx); }
+function runSub(num) { runSubAsync(num); }
 
 function setManualMemory() {
     const nameInput = cleanText(document.getElementById('manual-mem-name').value);
@@ -1819,6 +2004,16 @@ function clearOutputOnly() {
 }
 
 function resetEngine() {
+    if (isExecutionRunning) {
+        abortCurrentExecution();
+    }
+    
+    // CanvasとAudioのリセット
+    if (typeof casicCanvas !== 'undefined') casicCanvas.reset();
+    if (typeof activeAudios !== 'undefined') {
+        for (const k in activeAudios) activeAudios[k].pause();
+    }
+    
     state.vars = {};
     state.arrays = {};
     state.dicts = {};
@@ -1837,6 +2032,12 @@ function resetEngine() {
     state.pc = 0;
     state.totalSteps = 0;
     state.warnings = [];
+    
+    state.isAborting = false;
+    state.isStepMode = false;
+    
+    state.lastTickTime = null;
+    state.lastFrameTime = null;
 
     if (typeof outputPagination !== 'undefined') {
         outputPagination.currentPage = 1;
@@ -1854,57 +2055,6 @@ function resetEngine() {
     updateLineNumbers();
     syncPopupOutput();
     syncPopupCmdline();
-}
-
-function runMain() {
-    resetEngine();
-    const funcErrs = syncMainFunctions();
-    const code = document.getElementById('code').value;
-    const res = executeCasicCode(code, 1, false);
-    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), true, 'All', res.warnings);
-}
-
-function stepMain() {
-    const funcErrs = syncMainFunctions();
-    const lines = getMainCodeLinesArray();
-    if (state.pc >= lines.length || state.pc < 0) {
-        state.pc = 0;
-        state.stepEvaluateBranch = false;
-    }
-    const lineIdx = state.pc;
-    state.warnings = [];
-    const res = runMainCodeSession({
-        endLineIdx: lines.length - 1,
-        maxSteps: 1
-    });
-    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, lineIdx + 1, state.warnings);
-}
-
-function runClickedLine(lineIdx) {
-    const funcErrs = syncMainFunctions();
-    const lines = getMainCodeLinesArray();
-    if (lineIdx < 0 || lineIdx >= lines.length) return;
-    state.pc = lineIdx;
-    state.warnings = [];
-    const labelScan = buildLabelMap(lines, 1);
-    const cfStructure = buildControlFlowStructure(lines, 1, true);
-    const res = executeLineWithControlFlow(lineIdx, lines, 1, labelScan.labels, cfStructure, true);
-    const allErrors = funcErrs.concat(labelScan.errors, cfStructure.errors, res.errors);
-
-    if (res.nextLineIdx < lines.length && res.nextLineIdx !== lineIdx + 1) {
-        state.pc = res.nextLineIdx;
-        state.stepEvaluateBranch = res.nextEvalBranch;
-    }
-    appendOutputAndErrors(res.output, allErrors, false, lineIdx + 1, state.warnings);
-}
-
-function runSub(num) {
-    const funcErrs = syncMainFunctions();
-    const subEl = document.getElementById('sub-code' + num);
-    if (!subEl) return;
-    const code = subEl.value;
-    const res = executeCasicCode(code, 1, true);
-    appendOutputAndErrors(res.output, funcErrs.concat(res.errors), false, 'Sub' + num, res.warnings);
 }
 
 window.onload = function() {
@@ -1951,20 +2101,35 @@ window.onload = function() {
     }
 
     document.getElementById('code').value = [
-        '# 関数タブで定義した calc_score() と sum_to() を呼び出すテスト',
-        'out "calc_score(2, 3) = " & calc_score(2, 3)',
-        'out "sum_to(10) = " & sum_to(10)',
+        '# 新規追加機能のテスト',
+        'out "wait 1000..."',
+        'wait 1000',
+        'out "Done!"',
         '',
-        '# 改訂で追加された between_get / dist / 三角関数',
-        'out "between_get = " & between_get("<<abc>def<geh>>", "<", ">", "2")',
-        'out "dist = " & dist(10, 10, 50, 40)',
-        'out "sin(90)=" & sin(90) & " / cos(180)=" & cos(180) & " / atan2(-5,-5)=" & atan2(-5, -5)'
+        '# キーボード入力判定',
+        'out "Right Shift Pressed? : " & key("right_shift")',
+        'out "Keys: " & join(keys())',
+        '',
+        '# Fetchの非同期テスト (1秒くらいで変数に値が入る)',
+        'fetch(false) mytext, "https://example.com/"',
+        'out "Fetch sent (async). Check memory later."',
+        '',
+        '# tps() / fps() テスト',
+        'tick',
+        'wait 100',
+        'tick',
+        'out "TPS: " & tps()'
     ].join('\n');
 
     document.getElementById('cmdline-input').value = 'cont';
 
+    // 10万ループ（非同期なのでブラウザがフリーズしないかテスト用）
     document.getElementById('sub-code1').value = [
-        'out rep("0123456789ABCDEF", 2000)'
+        'for(100000)',
+        '    # 途中で「■ 停止」ボタンを押せば止まります',
+        '    a += 1',
+        'end',
+        'out "Count=" & a'
     ].join('\n');
 
     document.getElementById('sub-code2').value = 'run 1:3';

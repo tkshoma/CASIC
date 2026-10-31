@@ -1,5 +1,5 @@
 // ==========================================
-// 組み込み関数 (1章〜9章) & 関数呼び出しディスパッチ
+// 組み込み関数 (1章〜11章) & 関数呼び出しディスパッチ
 // ==========================================
 
 function formatCleanMathResult(val) {
@@ -82,7 +82,6 @@ function executeSqueezeFunction(args) {
     return out;
 }
 
-// 文字列s1内の s2 と s3 の対応ペアを抽出する共通ヘルパー
 function extractBetweenPairs(s1, s2, s3) {
     if (s2 === '' || s3 === '') return [];
 
@@ -145,9 +144,6 @@ function extractBetweenPairs(s1, s2, s3) {
     return pairs;
 }
 
-// 7章: between_get(s1, s2, s3, n) 関数ヘルパー
-// n>0: 前から数えてn番目のs2とそれに対応するs3の間にある文字列を返す。
-// n<0: 後ろから数えて|n|番目のs3とそれに対応するs2の間にある文字列を返す。
 function executeBetweenGetFunction(args) {
     if (args.length < 3) return "";
     const s1 = toDisplayString(args[0]);
@@ -180,8 +176,6 @@ function executeBetweenGetFunction(args) {
     }
 }
 
-// 7章: between_replace(s1, s2, s3, s4) 関数ヘルパー
-// 文字列s1の中で、s2とs3の間にある文字列をs4(初期値 "")に置き換えた文字列を返す。
 function executeBetweenReplaceFunction(args) {
     if (args.length < 3) return args[0] ? toDisplayString(args[0]) : "";
     const s1 = toDisplayString(args[0]);
@@ -210,8 +204,6 @@ function executeBetweenReplaceFunction(args) {
     return out;
 }
 
-// 7章: between_list(s1, s2, s3, n) 関数ヘルパー
-// 文字列s1の中でs2とs3の間にある文字列を取り出し配列型で返す。
 function executeBetweenListFunction(args) {
     if (args.length < 3) return [];
     const s1 = toDisplayString(args[0]);
@@ -292,8 +284,6 @@ function executeBetweenListFunction(args) {
     return outList;
 }
 
-// 7章: unescape(s, type) 関数ヘルパー
-// type: "all" (初期値), "unicode", "html", "url"（大文字小文字不問）
 function executeUnescapeFunction(args) {
     if (args.length === 0) return "";
     let result = toDisplayString(args[0]);
@@ -456,6 +446,23 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
     if (funcNameLower === 'round' || funcNameLower === 'floor' || funcNameLower === 'ceil' || funcNameLower === 'trunc') {
         if (args.length === 0) return "0";
         return applyRoundingFunction(funcNameLower, args[0], args.length >= 2 ? args[1] : null);
+    }
+    if (funcNameLower === 'fix') {
+        if (args.length === 0) return "0";
+        const n1Val = args[0];
+        const n2Val = args.length >= 2 ? args[1] : 0;
+        const n2 = Math.max(0, Math.trunc(parseCasicNumber(n2Val).num));
+        let rawStr = applyRoundingFunction('round', n1Val, String(n2));
+        if (n2 > 0) {
+            if (rawStr.indexOf('.') === -1) rawStr += '.';
+            const decimalParts = rawStr.split('.');
+            let dec = decimalParts[1] || '';
+            while (dec.length < n2) {
+                dec += '0';
+            }
+            rawStr = decimalParts[0] + '.' + dec;
+        }
+        return rawStr;
     }
     if (funcNameLower === 'min' || funcNameLower === 'max' || funcNameLower === 'sum') {
         let items = [];
@@ -849,6 +856,24 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
     if (funcNameLower === 'unescape') {
         return executeUnescapeFunction(args);
     }
+    if (funcNameLower === 'base64') {
+        if (args.length === 0) return "";
+        const s = toDisplayString(args[0]);
+        try {
+            return btoa(unescape(encodeURIComponent(s)));
+        } catch (e) {
+            return "";
+        }
+    }
+    if (funcNameLower === 'unbase64') {
+        if (args.length === 0) return "";
+        const s = toDisplayString(args[0]);
+        try {
+            return decodeURIComponent(escape(atob(s)));
+        } catch (e) {
+            return "";
+        }
+    }
     if (funcNameLower === 'at') {
         return executeAtFunction(argResults);
     }
@@ -964,7 +989,54 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         };
     }
 
-    // 10. ユーザー定義関数の呼び出し
+    // 10. 物理的入力の関数
+    if (funcNameLower === 'key') {
+        if (args.length < 1) return "0";
+        const kStr = toDisplayString(args[0]).toLowerCase();
+        return keyInputState.current.has(kStr) ? "1" : "0";
+    }
+    if (funcNameLower === 'key_down') {
+        if (args.length < 1) return "0";
+        const kStr = toDisplayString(args[0]).toLowerCase();
+        return keyInputState.pressedSinceLastTick.has(kStr) ? "1" : "0";
+    }
+    if (funcNameLower === 'key_up') {
+        if (args.length < 1) return "0";
+        const kStr = toDisplayString(args[0]).toLowerCase();
+        return keyInputState.releasedSinceLastTick.has(kStr) ? "1" : "0";
+    }
+    if (funcNameLower === 'keys') {
+        const arr = [];
+        keyInputState.current.forEach(function(k) { arr.push(k); });
+        return arr;
+    }
+
+    // 11. その他の関数 (g_color, fps, tps)
+    if (funcNameLower === 'g_color') {
+        // [TODO: Canvas未実装のため、仮で #000000 を返す]
+        return "#000000";
+    }
+    if (funcNameLower === 'fps') {
+        const now = performance.now();
+        if (state.lastFrameTime === null) {
+            state.lastFrameTime = now;
+            return "0";
+        }
+        const diff = now - state.lastFrameTime;
+        if (diff <= 0) return "0";
+        return formatCleanMathResult(1000 / diff);
+    }
+    if (funcNameLower === 'tps') {
+        const now = performance.now();
+        if (state.lastTickTime === null) {
+            return "0";
+        }
+        const diff = now - state.lastTickTime;
+        if (diff <= 0) return "0";
+        return formatCleanMathResult(1000 / diff);
+    }
+
+    // ユーザー定義関数の呼び出し
     if (Object.prototype.hasOwnProperty.call(state.functions, rawFuncNameLower)) {
         if (typeof invokeUserDefinedFunction === 'function') {
             return invokeUserDefinedFunction(state.functions[rawFuncNameLower], argResults);

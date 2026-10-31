@@ -158,6 +158,68 @@ function xorBig(a, b) {
 }
 
 // ==========================================
+// 1.5 物理的キーボード入力のトラッキング
+// ==========================================
+const keyInputState = {
+    current: new Set(),
+    pressedSinceLastTick: new Set(),
+    releasedSinceLastTick: new Set()
+};
+
+function getCasicKeyName(eKey, eCode) {
+    if (eKey.length === 1) {
+        return eKey.toLowerCase();
+    }
+    if (eCode.startsWith('Numpad') && eCode.length === 7 && isDigitChar(eCode[6])) {
+        return 'num' + eCode[6];
+    }
+    if (eKey.startsWith('F') && eKey.length <= 3) return eKey;
+
+    const lower = eKey.toLowerCase();
+    if (lower === ' ') return 'space';
+    if (lower === 'escape') return 'escape';
+    if (lower === 'enter') return 'enter';
+    if (lower === 'tab') return 'tab';
+    if (lower === 'backspace') return 'backspace';
+    if (lower === 'delete') return 'delete';
+    
+    if (lower === 'shift') return eCode === 'ShiftRight' ? 'right_shift' : 'left_shift';
+    if (lower === 'control') return eCode === 'ControlRight' ? 'right_control' : 'left_control';
+    if (lower === 'alt') return 'alt';
+    if (lower === 'meta') return 'command';
+
+    if (lower === 'arrowup') return 'up_arrow';
+    if (lower === 'arrowdown') return 'down_arrow';
+    if (lower === 'arrowleft') return 'left_arrow';
+    if (lower === 'arrowright') return 'right_arrow';
+    if (lower === 'fn') return 'function';
+
+    return lower;
+}
+
+window.addEventListener('keydown', function(e) {
+    if (e.isComposing) return;
+    const kName = getCasicKeyName(e.key, e.code);
+    if (!keyInputState.current.has(kName)) {
+        keyInputState.current.add(kName);
+        keyInputState.pressedSinceLastTick.add(kName);
+    }
+});
+
+window.addEventListener('keyup', function(e) {
+    const kName = getCasicKeyName(e.key, e.code);
+    if (keyInputState.current.has(kName)) {
+        keyInputState.current.delete(kName);
+        keyInputState.releasedSinceLastTick.add(kName);
+    }
+});
+
+function resetKeyTickState() {
+    keyInputState.pressedSinceLastTick.clear();
+    keyInputState.releasedSinceLastTick.clear();
+}
+
+// ==========================================
 // 2. CASIC ランタイム状態・同義語（エイリアス）定義
 // ==========================================
 const state = {
@@ -176,7 +238,14 @@ const state = {
     lastModified: null,
     pc: 0,
     totalSteps: 0,
-    warnings: []
+    warnings: [],
+    
+    // 非同期強制停止・ステップ実行判定フラグ
+    isAborting: false,
+    isStepMode: false,
+    
+    lastTickTime: null,
+    lastFrameTime: null
 };
 
 const COMMAND_ALIASES = {
@@ -300,6 +369,7 @@ const COMMAND_KEYWORDS = new Set([
     'clear', 'l_clear',
     'uniq', 'l_uniq',
     'seed', 'rename', 'stop', 'return', 'fun', 'wait', 'js',
+    'tick', 'frame', 'fetch',
     'g_size', 'g_smooth', 'g_clear', 'g_line', 'g_poly', 'g_rect', 'g_circle', 'g_image', 'g_text',
     'a_play', 'a_stop',
     'cont', 'run', 'goto', 'step', 'reset'
@@ -310,7 +380,7 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'abs', 'c_abs', 'not', 'c_not', 'sqrt', 'c_sqrt',
     'round', 'c_round', 'floor', 'c_floor', 'ceil', 'celi', 'c_ceil', 'trunc', 'c_trunc',
     'min', 'c_min', 'max', 'c_max', 'sum', 'c_sum', 'gcd', 'c_gcd', 'lcm', 'c_lcm',
-    'base', 'c_base', 'clamp', 'c_clamp', 'dist', 'c_dist',
+    'base', 'c_base', 'clamp', 'c_clamp', 'dist', 'c_dist', 'fix',
     'sin', 'cos', 'tan', 'atan2',
     'band', 'b_and', 'bor', 'b_or', 'bxor', 'b_xor', 'bnot', 'b_not',
     'rand', 'rand.', 'hrand', 'randh', 'hrand.', 'randh.',
@@ -326,12 +396,13 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'between_get', 's_between_get',
     'between_replace', 's_between_replace',
     'between_list', 's_between_list',
-    'unescape', 's_unescape',
+    'unescape', 's_unescape', 'base64', 'unbase64',
     'at', 's_at', 'l_at', 'd_at',
     'join', 'l_join', 'grid', 'l_grid', 'flat', 'l_flat', 'bs', 'l_bs', 'uniq', 'l_uniq',
     'has', 'd_has', 'keys', 'key', 'd_keys', 'd_key', 'json', 'd_json',
-    'g_shape', 'd_g_shape', 'g_image', 'd_g_image', 'g_text', 'd_g_text',
-    'a_sound', 'd_a_sound'
+    'g_shape', 'd_g_shape', 'g_image', 'd_g_image', 'g_text', 'd_g_text', 'g_color',
+    'a_sound', 'd_a_sound',
+    'key', 'key_up', 'key_down', 'keys', 'fps', 'tps'
 ]);
 
 const ASSIGN_OPS = ['/.=', '+=', '-=', '&=', '*=', '/=', '%=', '='];

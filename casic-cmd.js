@@ -781,6 +781,50 @@ function executeJsCommand(restRaw) {
     fn();
 }
 
+function executeFetchCommand(restRaw) {
+    const parsed = parseCommandOptionAndTarget(restRaw);
+    const args = splitCommandTargetArgs(parsed.targetStr);
+    if (args.length < 2) throw new Error('fetch命令には代入先の変数とURLを指定してください');
+    
+    const varName = cleanText(args[0]);
+    if (!isValidVarIdentifier(varName)) {
+        throw new Error('fetch命令の代入先には有効な変数名を指定してください: ' + varName);
+    }
+    const urlStr = toDisplayString(evaluateExpression(args[1]));
+    
+    let isSync = true;
+    if (parsed.optStr !== null && parsed.optStr !== '') {
+        isSync = isCasicTruthy(evaluateExpression(parsed.optStr));
+    }
+
+    if (!isSync) {
+        fetch(urlStr).then(function(res) {
+            if (res.ok) return res.text();
+            return "";
+        }).then(function(text) {
+            setVar(varName, text);
+            if (typeof renderMemoryUI === 'function') renderMemoryUI();
+        }).catch(function(e) {
+            console.warn("Fetch (async) error:", e);
+        });
+        setVar(varName, "");
+    } else {
+        try {
+            state.warnings.push('[警告] fetch命令(同期) が実行されました。通信中は画面がフリーズします。');
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', urlStr, false);
+            xhr.send(null);
+            if (xhr.status === 200) {
+                setVar(varName, xhr.responseText);
+            } else {
+                setVar(varName, "");
+            }
+        } catch (e) {
+            setVar(varName, "");
+        }
+    }
+}
+
 // ==========================================
 // 4. 入出力の命令（in / charin / allin / resetin / out / put）
 // ==========================================
@@ -1032,401 +1076,421 @@ function executeOutputCommand(cmdLower, restRaw) {
 }
 
 // ==========================================
-// 5. ラベル解析・単一命令実行
+// 5. 描画・音声命令（g_*, a_*）の実行
 // ==========================================
 
-function parseToLabelLiteral(rawArg, lineNum) {
-    const s = cleanText(rawArg);
-    if (s === '') {
-        return { label: null, error: '[Line ' + lineNum + '] to命令には移動先ラベルが必要です' };
+const activeAudios = {};
+
+function executeGraphicsOrAudioCommand(cmdLower, restRaw, lineNum) {
+    if (cmdLower.startsWith('g_') && typeof casicCanvas !== 'undefined') {
+        casicCanvas.show();
     }
-    if (s.endsWith('$')) {
-        return { label: null, error: '[Line ' + lineNum + '] to命令には変数・式($)は指定できません: ' + s };
-    }
-    let literal = s;
-    if ((literal.startsWith('"') && literal.endsWith('"')) || (literal.startsWith("'") && literal.endsWith("'"))) {
-        if (literal.length >= 2) {
-            literal = unescapeCasicString(literal.slice(1, -1));
+    
+    const parsed = parseCommandOptionAndTarget(restRaw);
+    const args = splitCommandTargetArgs(parsed.targetStr);
+    const offCtx = typeof casicCanvas !== 'undefined' ? casicCanvas.getOffscreenCtx() : null;
+
+    function getOptDict() {
+        if (parsed.optStr) {
+            const v = evaluateExpression(parsed.optStr);
+            if (isPlainDictObject(v)) return v;
+            return parseCasicJsonToDict(v).dict || {};
         }
-    } else if (literal.startsWith('/')) {
-        literal = unescapeCasicString(literal.slice(1));
+        return {};
     }
-    return { label: literal.toLowerCase(), error: null };
-}
 
-function evaluateGoTargetLabel(rawArg, lineNum) {
-    const s = cleanText(rawArg);
-    if (s === '') {
-        return { label: null, error: '[Line ' + lineNum + '] go命令には移動先ラベルが必要です' };
+    function num(expr, def) {
+        if (expr === undefined || expr === null || cleanText(expr) === '') return def;
+        return parseCasicNumber(evaluateExpression(expr)).num;
     }
-    if (s.endsWith('$')) {
-        const exprPart = cleanText(s.slice(0, -1));
-        if (exprPart === '') {
-            return { label: null, error: '[Line ' + lineNum + '] go命令の$の前に式がありません' };
+    
+    function str(expr, def) {
+        if (expr === undefined || expr === null || cleanText(expr) === '') return def;
+        return toDisplayString(evaluateExpression(expr));
+    }
+
+    if (cmdLower === 'g_size') {
+        if (typeof casicCanvas !== 'undefined') casicCanvas.setSize(num(args[0], 480), num(args[1], 360));
+        return;
+    }
+    if (cmdLower === 'g_smooth') {
+        if (typeof casicCanvas !== 'undefined') casicCanvas.setSmooth(isCasicTruthy(evaluateExpression(args[0] || "true")));
+        return;
+    }
+    if (cmdLower === 'g_clear') {
+        if (typeof casicCanvas !== 'undefined') casicCanvas.clear(str(args[0], "#ffffff"));
+        return;
+    }
+    
+    if (!offCtx && cmdLower.startsWith('g_')) return;
+
+    if (cmdLower === 'g_line') {
+        const optArgs = parsed.optStr ? splitTopLevelComma(parsed.optStr) : [];
+        const w = num(optArgs[0], 1);
+        const c = str(optArgs[1], "#000000");
+        const b = isCasicTruthy(optArgs[2] ? evaluateExpression(optArgs[2]) : "0");
+
+        let coords = [];
+        if (args.length === 1) {
+            const v = evaluateExpression(args[0]);
+            if (Array.isArray(v)) {
+                coords = coerceToArray(v).map(val => parseCasicNumber(val).num);
+            } else {
+                coords = [parseCasicNumber(v).num];
+            }
+        } else {
+            coords = args.map(a => num(a, 0));
         }
-        const evaluated = toDisplayString(evaluateExpression(exprPart));
-        return { label: String(evaluated).toLowerCase(), error: null };
-    }
+        coords = coords.flat(Infinity).map(Number);
 
-    let literal = s;
-    if ((literal.startsWith('"') && literal.endsWith('"')) || (literal.startsWith("'") && literal.endsWith("'"))) {
-        if (literal.length >= 2) {
-            literal = unescapeCasicString(literal.slice(1, -1));
+        if (coords.length < 4) return;
+
+        offCtx.save();
+        offCtx.lineWidth = w;
+        offCtx.strokeStyle = c;
+        if (b) {
+            offCtx.lineCap = 'round';
+            offCtx.lineJoin = 'round';
         }
-    } else if (literal.startsWith('/')) {
-        literal = unescapeCasicString(literal.slice(1));
+        offCtx.beginPath();
+        offCtx.moveTo(coords[0], casicCanvas.transformY(coords[1]));
+        for (let i = 2; i + 1 < coords.length; i += 2) {
+            offCtx.lineTo(coords[i], casicCanvas.transformY(coords[i+1]));
+        }
+        offCtx.stroke();
+        offCtx.restore();
+        return;
     }
-    return { label: literal.toLowerCase(), error: null };
-}
 
-function buildLabelMap(lines, startLineOffset = 1) {
-    const labels = {};
-    const errors = [];
+    if (cmdLower === 'g_poly') {
+        const d = getOptDict();
+        const color = d['color'] !== undefined ? String(d['color']) : '#000000';
+        const r = Number(d['r']) || 0;
+        const alpha = d['alpha'] !== undefined ? Number(d['alpha']) : 1;
+        const fill = d['fill'] !== undefined ? isCasicTruthy(d['fill']) : true;
+        const frame = Number(d['frame']) || 1;
 
-    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-        const lineNum = startLineOffset + lineIdx;
-        const stmts = splitStatementsByColon(lines[lineIdx]);
+        let coords = [];
+        if (args.length === 1) {
+            const v = evaluateExpression(args[0]);
+            coords = coerceToArray(v).flat(Infinity).map(val => parseCasicNumber(val).num);
+        } else {
+            coords = args.map(a => num(a, 0)).flat(Infinity);
+        }
 
-        for (let stmtIdx = 0; stmtIdx < stmts.length; stmtIdx++) {
-            const stmt = cleanText(stmts[stmtIdx]);
-            if (stmt === '') continue;
+        if (coords.length < 6) return; // 最低3点必要
 
-            const i = readCommandWordLength(stmt);
-            if (i === 0) continue;
+        offCtx.save();
+        offCtx.globalAlpha = alpha;
+        if (fill) {
+            offCtx.fillStyle = color;
+        } else {
+            offCtx.strokeStyle = color;
+            offCtx.lineWidth = frame;
+        }
+        if (r > 0) {
+            offCtx.lineJoin = 'round';
+        }
 
-            const wordLower = stmt.slice(0, i).toLowerCase();
-            const rest = stmt.slice(i);
-            const restTrimmed = cleanText(rest);
+        offCtx.beginPath();
+        offCtx.moveTo(coords[0], casicCanvas.transformY(coords[1]));
+        for (let i = 2; i + 1 < coords.length; i += 2) {
+            offCtx.lineTo(coords[i], casicCanvas.transformY(coords[i+1]));
+        }
+        offCtx.closePath();
 
-            if (matchAssignmentOp(restTrimmed) !== null || restTrimmed.startsWith('[') || restTrimmed.startsWith('{')) continue;
+        if (fill) offCtx.fill();
+        else offCtx.stroke();
+        offCtx.restore();
+        return;
+    }
 
-            if (wordLower === 'to' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '"' || rest[0] === "'" || rest[0] === '/')) {
-                const parsed = parseToLabelLiteral(restTrimmed, lineNum);
-                if (parsed.error) {
-                    errors.push(parsed.error);
-                } else if (parsed.label !== null) {
-                    if (Object.prototype.hasOwnProperty.call(labels, parsed.label)) {
-                        const firstLine = labels[parsed.label].lineIdx + startLineOffset;
-                        errors.push('[Line ' + lineNum + '] 同じラベル "' + parsed.label + '" を持つto命令は複数記述できません (1つ目: Line ' + firstLine + ')');
+    if (cmdLower === 'g_rect') {
+        let d = {};
+        if (args.length >= 3) {
+            const c = str(args[0], "#000000");
+            const x1 = num(args[1], 0);
+            const y1 = num(args[2], 0);
+            const x2 = num(args[3], x1);
+            const y2 = num(args[4], y1);
+            d = {
+                color: c,
+                x: (x1 + x2) / 2,
+                y: (y1 + y2) / 2,
+                w: Math.abs(x2 - x1),
+                h: Math.abs(y2 - y1),
+                fill: 1
+            };
+        } else {
+            if (args.length === 1) {
+                const v = evaluateExpression(args[0]);
+                if (isPlainDictObject(v)) d = v;
+            }
+            if (Object.keys(d).length === 0) d = getOptDict();
+        }
+
+        const x = Number(d['x']) || 0;
+        const y = Number(d['y']) || 0;
+        const w = Number(d['w']) || 1;
+        const h = Number(d['h']) || 1;
+        const rot = Number(d['rot']) || 0;
+        const r = Number(d['r']) || 0;
+        const alpha = d['alpha'] !== undefined ? Number(d['alpha']) : 1;
+        const color = d['color'] !== undefined ? String(d['color']) : '#000000';
+        const fill = d['fill'] !== undefined ? isCasicTruthy(d['fill']) : true;
+        const frame = Number(d['frame']) || 1;
+
+        offCtx.save();
+        offCtx.globalAlpha = alpha;
+        offCtx.translate(x, casicCanvas.transformY(y));
+        offCtx.rotate(rot * Math.PI / 180);
+        
+        if (fill) offCtx.fillStyle = color;
+        else {
+            offCtx.strokeStyle = color;
+            offCtx.lineWidth = frame;
+        }
+
+        if (r > 0 && typeof offCtx.roundRect === 'function') {
+            offCtx.beginPath();
+            offCtx.roundRect(-w/2, -h/2, w, h, r);
+            if (fill) offCtx.fill();
+            else offCtx.stroke();
+        } else {
+            if (fill) offCtx.fillRect(-w/2, -h/2, w, h);
+            else offCtx.strokeRect(-w/2, -h/2, w, h);
+        }
+        offCtx.restore();
+        return;
+    }
+
+    if (cmdLower === 'g_circle') {
+        let d = {};
+        if (args.length >= 4) {
+            d = {
+                color: str(args[0], "#000000"),
+                x: num(args[1], 0),
+                y: num(args[2], 0),
+                w: num(args[3], 0) * 2,
+                h: num(args[3], 0) * 2,
+                fill: 1
+            };
+        } else {
+            if (args.length === 1) {
+                const v = evaluateExpression(args[0]);
+                if (isPlainDictObject(v)) d = v;
+            }
+            if (Object.keys(d).length === 0) d = getOptDict();
+        }
+
+        const x = Number(d['x']) || 0;
+        const y = Number(d['y']) || 0;
+        const w = Number(d['w']) || 1;
+        const h = Number(d['h']) || 1;
+        const alpha = d['alpha'] !== undefined ? Number(d['alpha']) : 1;
+        const color = d['color'] !== undefined ? String(d['color']) : '#000000';
+        const fill = d['fill'] !== undefined ? isCasicTruthy(d['fill']) : true;
+        const frame = Number(d['frame']) || 1;
+        const rot = Number(d['rot']) || 0;
+
+        offCtx.save();
+        offCtx.globalAlpha = alpha;
+        offCtx.translate(x, casicCanvas.transformY(y));
+        offCtx.rotate(rot * Math.PI / 180);
+
+        offCtx.beginPath();
+        offCtx.ellipse(0, 0, w/2, h/2, 0, 0, 2 * Math.PI);
+        
+        if (fill) {
+            offCtx.fillStyle = color;
+            offCtx.fill();
+        } else {
+            offCtx.strokeStyle = color;
+            offCtx.lineWidth = frame;
+            offCtx.stroke();
+        }
+        offCtx.restore();
+        return;
+    }
+
+    if (cmdLower === 'g_image') {
+        const d = getOptDict();
+        const s = str(args[0], "");
+        const imgAsset = typeof getImportedImage === 'function' ? getImportedImage(s) : null;
+        if (!imgAsset || !imgAsset.img) {
+            state.warnings.push('[Line ' + lineNum + '] 画像 "' + s + '" が見つからないかインポートされていません');
+            return;
+        }
+
+        const img = imgAsset.img;
+        let clipX = 0, clipY = 0, clipW = img.width, clipH = img.height;
+        if (d['clip'] && d['clip'] !== '' && d['clip'] !== '[]') {
+            const clipArr = coerceToArray(evaluateExpression(d['clip']));
+            if (clipArr.length >= 4) {
+                clipX = Number(clipArr[0]) || 0;
+                clipY = Number(clipArr[1]) || 0;
+                clipW = Number(clipArr[2]) || img.width;
+                clipH = Number(clipArr[3]) || img.height;
+                // CASIC側のclipは左下が基準。imgのdrawImageは左上が基準。
+                clipY = img.height - clipY - clipH;
+            }
+        }
+
+        const w = d['w'] !== undefined && d['w'] !== '' ? Number(d['w']) : clipW;
+        const h = d['h'] !== undefined && d['h'] !== '' ? Number(d['h']) : clipH;
+        const x = Number(d['x']) || 0;
+        const y = Number(d['y']) || 0;
+        const cx = d['cx'] !== undefined && d['cx'] !== '' ? Number(d['cx']) : w / 2;
+        const cy = d['cy'] !== undefined && d['cy'] !== '' ? Number(d['cy']) : h / 2;
+        const rot = Number(d['rot']) || 0;
+        const alpha = d['alpha'] !== undefined ? Number(d['alpha']) : 1;
+        const flipx = isCasicTruthy(d['flipx']);
+        const flipy = isCasicTruthy(d['flipy']);
+        const hue = Number(d['hue']) || 0;
+
+        offCtx.save();
+        offCtx.globalAlpha = alpha;
+        if (hue !== 0) {
+            offCtx.filter = `hue-rotate(${hue}deg)`;
+        }
+
+        offCtx.translate(x, casicCanvas.transformY(y));
+        offCtx.rotate(rot * Math.PI / 180);
+        offCtx.scale(flipx ? -1 : 1, flipy ? -1 : 1);
+        offCtx.drawImage(img, clipX, clipY, clipW, clipH, -cx, -(h - cy), w, h);
+        
+        offCtx.restore();
+        return;
+    }
+
+    if (cmdLower === 'g_text') {
+        const d = getOptDict();
+        const text = str(args[0], "");
+        const x = Number(d['x']) || 0;
+        const y = Number(d['y']) || 0;
+        const size = Number(d['size']) || 30;
+        const font = typeof resolveCasicFontFamily === 'function' ? resolveCasicFontFamily(String(d['font'] || '')) : 'sans-serif';
+        const color = d['color'] !== undefined ? String(d['color']) : '#000000';
+        const alpha = d['alpha'] !== undefined ? Number(d['alpha']) : 1;
+        const rot = Number(d['rot']) || 0;
+        
+        const alignStr = String(d['align'] || 'left').toLowerCase();
+        const valignStr = String(d['valign'] || 'up').toLowerCase();
+        
+        let hAlign = 'left';
+        if (alignStr === 'middle' || alignStr === 'center') hAlign = 'center';
+        if (alignStr === 'right') hAlign = 'right';
+        
+        let vAlign = 'top';
+        if (valignStr === 'up') vAlign = 'top';
+        if (valignStr === 'middle' || valignStr === 'center') vAlign = 'middle';
+        if (valignStr === 'down') vAlign = 'bottom';
+
+        offCtx.save();
+        offCtx.globalAlpha = alpha;
+        offCtx.font = `${size}px ${font}`;
+        offCtx.fillStyle = color;
+        offCtx.textAlign = hAlign;
+        offCtx.textBaseline = vAlign;
+
+        offCtx.translate(x, casicCanvas.transformY(y));
+        offCtx.rotate(rot * Math.PI / 180);
+        
+        // 改行と幅制限
+        const wLimit = d['w'] !== undefined && d['w'] !== '' && d['w'] !== '∞' ? Number(d['w']) : Infinity;
+        const lineH = d['h'] !== undefined && d['h'] !== '' ? Number(d['h']) : size * 1.3;
+
+        const lines = text.split('\n');
+        const drawLines = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (wLimit === Infinity) {
+                drawLines.push(lines[i]);
+            } else {
+                let currentLine = '';
+                for (let j = 0; j < lines[i].length; j++) {
+                    const testLine = currentLine + lines[i][j];
+                    const metrics = offCtx.measureText(testLine);
+                    if (metrics.width > wLimit && j > 0) {
+                        drawLines.push(currentLine);
+                        currentLine = lines[i][j];
                     } else {
-                        labels[parsed.label] = { lineIdx: lineIdx, stmtIdx: stmtIdx };
+                        currentLine = testLine;
                     }
                 }
+                drawLines.push(currentLine);
             }
         }
+
+        // HTML CanvasのY軸は下方向。CASICではYが増えると上方向だが
+        // 文字列の複数行は下へ進むのが自然なので Canvas Y を足していく。
+        let currentY = 0;
+        if (vAlign === 'middle') {
+            currentY = - (drawLines.length - 1) * lineH / 2;
+        } else if (vAlign === 'bottom') {
+            currentY = - (drawLines.length - 1) * lineH;
+        }
+
+        for (let i = 0; i < drawLines.length; i++) {
+            offCtx.fillText(drawLines[i], 0, currentY);
+            currentY += lineH;
+        }
+
+        offCtx.restore();
+        return;
     }
 
-    return { labels, errors };
-}
+    if (cmdLower === 'a_play') {
+        const d = getOptDict();
+        const s1 = str(args[0], "");
+        const s2 = args.length > 1 ? str(args[1], "") : s1;
 
-function executeStatement(stmtRaw, lineNum) {
-    const trimmed = cleanText(stmtRaw);
-    if (trimmed === '') return { output: '', error: null, action: null };
-
-    state.totalSteps++;
-    if (state.totalSteps > 200000) {
-        return {
-            output: '',
-            error: '[Line ' + lineNum + '] 実行ステップ数が上限を超えたため強制終了しました（無限ループの可能性があります）',
-            action: { type: 'fin' }
-        };
-    }
-
-    try {
-        const dictAssignRes = tryExecuteDictBraceAssignment(trimmed, lineNum);
-        if (dictAssignRes && dictAssignRes.executed) {
-            return { output: flushFunctionOutput(''), error: null, action: null };
+        const audioAsset = typeof getImportedAudio === 'function' ? getImportedAudio(s1) : null;
+        if (!audioAsset || !audioAsset.url) {
+            state.warnings.push('[Line ' + lineNum + '] 音声 "' + s1 + '" が見つからないかインポートされていません');
+            return;
         }
 
-        const bracketAssignRes = tryExecuteBracketAssignment(trimmed);
-        if (bracketAssignRes && bracketAssignRes.executed) {
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
+        const vol = d['vol'] !== undefined ? Number(d['vol']) : 1;
+        const loop = isCasicTruthy(d['loop']);
+        const pitch = d['pitch'] !== undefined ? Number(d['pitch']) : 1;
+        const startSec = Number(d['start']) || 0;
+        const endSec = d['end'] !== undefined && d['end'] !== '' ? Number(d['end']) : null;
 
-        const varAssignRes = tryExecuteVariableAssignment(trimmed);
-        if (varAssignRes && varAssignRes.executed) {
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-
-        const cmdLen = readCommandWordLength(trimmed);
-        if (cmdLen === 0) {
-            return {
-                output: flushFunctionOutput(''),
-                error: '[Line ' + lineNum + '] 解釈できない命令です: ' + trimmed,
-                action: null
-            };
-        }
-
-        const rawCmdLower = trimmed.slice(0, cmdLen).toLowerCase();
-        const cmdLower = normalizeCommandName(rawCmdLower);
-        const rest = trimmed.slice(cmdLen);
-        const restTrimmed = cleanText(rest);
-
-        // コマンドライン専用命令 (cont, run, goto, step, reset)
-        if (cmdLower === 'cont' && (rest === '' || isSpaceChar(rest[0]))) {
-            return executeCmdlineCont(restTrimmed);
-        }
-        if (cmdLower === 'run' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === ':')) {
-            return executeCmdlineRun(restTrimmed);
-        }
-        if (cmdLower === 'goto' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(')) {
-            return executeCmdlineGoto(restTrimmed);
-        }
-        if (cmdLower === 'step' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(')) {
-            return executeCmdlineStep(restTrimmed);
-        }
-        if (cmdLower === 'reset' && (rest === '' || isSpaceChar(rest[0]))) {
-            if (restTrimmed !== '') {
-                return { output: '', error: 'reset命令に引数は指定できません', action: null };
-            }
-            if (typeof resetEngine === 'function') {
-                resetEngine();
-            }
-            return { output: '', error: null, action: null };
-        }
-
-        // stop / js / wait / return
-        if (cmdLower === 'stop' && restTrimmed === '') {
-            return {
-                output: flushFunctionOutput(''),
-                error: null,
-                action: { type: 'stop' }
-            };
-        }
-        if (cmdLower === 'js' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '"' || rest[0] === "'" || rest[0] === '/' || rest[0] === '(')) {
-            executeJsCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'wait' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(')) {
-            if (restTrimmed !== '') {
-                evaluateExpression(restTrimmed);
-            }
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'return' && (rest === '' || isSpaceChar(rest[0]) || rest[0] === '(' || rest[0] === '"' || rest[0] === "'" || rest[0] === '/' || rest[0] === '[' || rest[0] === '{')) {
-            const retVal = restTrimmed === '' ? "" : evaluateExpression(restTrimmed);
-            return {
-                output: flushFunctionOutput(''),
-                error: null,
-                action: { type: 'return', value: retVal }
-            };
-        }
-
-        // 1行 fun 命令
-        if (cmdLower === 'fun' && (rest === '' || isSpaceChar(rest[0]))) {
-            const parsedFun = parseFunHeader(restTrimmed);
-            if (parsedFun.error) {
-                return { output: '', error: '[Line ' + lineNum + '] ' + parsedFun.error, action: null };
-            }
-            if (parsedFun.inlineCode !== '') {
-                state.functions[parsedFun.funcNameLower] = {
-                    name: parsedFun.funcName,
-                    nameLower: parsedFun.funcNameLower,
-                    params: parsedFun.params,
-                    isSingleLine: true,
-                    inlineCode: parsedFun.inlineCode,
-                    bodyLines: [],
-                    startLineOffset: lineNum
-                };
-            }
-            return { output: '', error: null, action: null };
-        }
-
-        if (cmdLower === 'if') {
-            const paren = extractParenHead(restTrimmed);
-            if (!paren) {
-                return { output: '', error: '[Line ' + lineNum + '] if命令の条件括弧が正しくありません', action: null };
-            }
-            if (paren.after === '') {
-                return { output: '', error: null, action: null };
-            }
-            const condVal = evaluateExpression(paren.inside);
-            const preOut = flushFunctionOutput('');
-            if (isCasicTruthy(condVal)) {
-                const subRes = executeInlineStatements(paren.after, lineNum);
-                return { output: preOut + subRes.output, error: subRes.error, action: subRes.action };
-            }
-            return { output: preOut, error: null, action: null };
-        }
-
-        if (cmdLower === 'for') {
-            const paren = extractParenHead(restTrimmed);
-            if (!paren) {
-                return { output: '', error: '[Line ' + lineNum + '] for命令の括弧が正しくありません', action: null };
-            }
-            if (paren.after === '') {
-                return { output: '', error: null, action: null };
-            }
-            const spec = parseForSpecAndEvaluateCount(paren.inside, lineNum);
-            let totalOut = flushFunctionOutput('');
-            for (let iter = 1; iter <= spec.count; iter++) {
-                if (spec.varName) {
-                    setVar(spec.varName, String(iter));
-                }
-                const subRes = executeInlineStatements(paren.after, lineNum);
-                totalOut += subRes.output;
-                if (subRes.error) {
-                    return { output: totalOut, error: subRes.error, action: subRes.action };
-                }
-                if (subRes.action) {
-                    if (subRes.action.type === 'break') {
-                        if (subRes.action.count > 1) {
-                            return { output: totalOut, error: null, action: { type: 'break', count: subRes.action.count - 1 } };
-                        }
-                        break;
+        const audio = new Audio(audioAsset.url);
+        audio.volume = Math.max(0, Math.min(1, vol));
+        audio.loop = loop;
+        audio.playbackRate = Math.max(0.1, Math.min(16, pitch));
+        audio.currentTime = startSec;
+        
+        if (endSec !== null) {
+            audio.addEventListener('timeupdate', function handleTime() {
+                if (audio.currentTime >= endSec) {
+                    if (loop) {
+                        audio.currentTime = startSec;
+                    } else {
+                        audio.pause();
+                        audio.removeEventListener('timeupdate', handleTime);
                     }
-                    return { output: totalOut, error: null, action: subRes.action };
                 }
-            }
-            return { output: totalOut, error: null, action: null };
+            });
         }
 
-        if (cmdLower === 'while') {
-            const paren = extractParenHead(restTrimmed);
-            if (!paren) {
-                return { output: '', error: '[Line ' + lineNum + '] while命令の括弧が正しくありません', action: null };
-            }
-            if (paren.after === '') {
-                return { output: '', error: null, action: null };
-            }
-            let totalOut = '';
-            while (true) {
-                const condVal = evaluateExpression(paren.inside);
-                totalOut += flushFunctionOutput('');
-                if (!isCasicTruthy(condVal)) break;
-
-                const subRes = executeInlineStatements(paren.after, lineNum);
-                totalOut += subRes.output;
-                if (subRes.error) {
-                    return { output: totalOut, error: subRes.error, action: subRes.action };
-                }
-                if (subRes.action) {
-                    if (subRes.action.type === 'break') {
-                        if (subRes.action.count > 1) {
-                            return { output: totalOut, error: null, action: { type: 'break', count: subRes.action.count - 1 } };
-                        }
-                        break;
-                    }
-                    return { output: totalOut, error: null, action: subRes.action };
-                }
-            }
-            return { output: totalOut, error: null, action: null };
-        }
-
-        if (cmdLower === 'break') {
-            let count = 1;
-            if (restTrimmed !== '') {
-                const paren = extractParenHead(restTrimmed);
-                const exprStr = paren ? paren.inside : restTrimmed;
-                if (exprStr !== '') {
-                    const parsed = parseCasicNumber(evaluateExpression(exprStr));
-                    count = Math.max(1, Math.round(parsed.num));
-                }
-            }
-            return { output: flushFunctionOutput(''), error: null, action: { type: 'break', count: count } };
-        }
-
-        if (cmdLower === 'in') {
-            executeInCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'charin') {
-            executeCharinCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'allin') {
-            executeAllinCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'resetin') {
-            executeResetinCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'out' || cmdLower === 'put') {
-            const outStr = executeOutputCommand(cmdLower, rest);
-            return { output: flushFunctionOutput(outStr), error: null, action: null };
-        }
-        if (cmdLower === 'sort' || cmdLower === 'dsort' || cmdLower === 'rev') {
-            executeSortOrRevCommand(cmdLower, rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'push') {
-            executePushInsAddCommand(rawCmdLower, rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'replace') {
-            executeReplaceCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'del') {
-            executeDelCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'clear' || cmdLower === 'uniq') {
-            executeClearOrUniqCommand(cmdLower, rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'rename') {
-            executeRenameCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'seed') {
-            executeSeedCommand(rest);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-        if (cmdLower === 'to') {
-            const parsed = parseToLabelLiteral(restTrimmed, lineNum);
-            if (parsed.error) {
-                return { output: '', error: parsed.error, action: null };
-            }
-            return { output: '', error: null, action: null };
-        }
-        if (cmdLower === 'go') {
-            const target = evaluateGoTargetLabel(restTrimmed, lineNum);
-            if (target.error) {
-                return { output: flushFunctionOutput(''), error: target.error, action: null };
-            }
-            return {
-                output: flushFunctionOutput(''),
-                error: null,
-                action: { type: 'go', targetLabel: target.label, lineNum: lineNum }
-            };
-        }
-        if (cmdLower === 'exit') {
-            if (restTrimmed !== '') {
-                return {
-                    output: '',
-                    error: '[Line ' + lineNum + '] ' + rawCmdLower + '命令に引数は指定できません',
-                    action: null
-                };
-            }
-            return { output: '', error: null, action: { type: 'fin' } };
-        }
-
-        if (restTrimmed.startsWith('(') && Object.prototype.hasOwnProperty.call(state.functions, rawCmdLower)) {
-            evaluateExpression(trimmed);
-            return { output: flushFunctionOutput(''), error: null, action: null };
-        }
-
-        return {
-            output: flushFunctionOutput(''),
-            error: '[Line ' + lineNum + '] 未実装または不明な命令です: ' + trimmed,
-            action: null
-        };
-    } catch (e) {
-        return { output: flushFunctionOutput(''), error: '[Line ' + lineNum + '] 実行エラー: ' + e.message, action: null };
+        audio.play().catch(e => console.warn("Audio play failed", e));
+        activeAudios[s2] = audio;
+        return;
     }
-}
 
-function executeInlineStatements(codeStr, lineNum) {
-    const stmts = splitStatementsByColon(codeStr);
-    let out = '';
-    for (let i = 0; i < stmts.length; i++) {
-        const res = executeStatement(stmts[i], lineNum);
-        out += res.output;
-        if (res.error || res.action) {
-            return { output: out, error: res.error, action: res.action };
+    if (cmdLower === 'a_stop') {
+        const s = str(args[0], "");
+        if (s === '') {
+            for (const k in activeAudios) {
+                activeAudios[k].pause();
+            }
+        } else {
+            if (activeAudios[s]) {
+                activeAudios[s].pause();
+            }
         }
+        return;
     }
-    return { output: out, error: null, action: null };
 }

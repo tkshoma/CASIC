@@ -7,7 +7,8 @@ const popupWindows = {
     input: null,
     output: null,
     memory: null,
-    cmdline: null
+    cmdline: null,
+    canvas: null
 };
 
 const popupFontSizes = {
@@ -91,10 +92,11 @@ function openPopupWindow(type) {
         input: 'CASIC - Input (入力データ編集)',
         output: 'CASIC - Output (出力結果確認・5000文字改ページ)',
         memory: 'CASIC - Memory (メモリ可視化)',
-        cmdline: 'CASIC - Command Line (コマンドライン・エラーログ)'
+        cmdline: 'CASIC - Command Line (コマンドライン・エラーログ)',
+        canvas: 'CASIC - Canvas (描画結果)'
     };
 
-    const specs = (type === 'code')
+    const specs = (type === 'code' || type === 'canvas')
         ? 'width=920,height=700,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes'
         : 'width=740,height=580,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes';
 
@@ -132,6 +134,8 @@ function openPopupWindow(type) {
         extraControlsHtml =
             '<label class="wrap-label"><input type="checkbox" id="chk-wrap" checked> 端で折り返す</label>' +
             '<button id="btn-clear-cmdline" class="action-btn clear-btn">ログクリア</button>';
+    } else if (type === 'canvas') {
+        extraControlsHtml = '<span class="update-msg" style="color:#aaa;">(メイン画面のCanvas描画と同期しています)</span>';
     }
 
     let bodyContentHtml = '';
@@ -168,7 +172,16 @@ function openPopupWindow(type) {
                 '<textarea id="popup-cmdline-input" spellcheck="false" placeholder="コマンドを入力 (cont, run 2:3, goto 2, step 2, またはCASICコード... Ctrl+Enterで実行)"></textarea>' +
                 '<button id="btn-popup-cmd-run" class="action-btn run-cmd-btn">実行</button>' +
             '</div>';
+    } else if (type === 'canvas') {
+        const cW = (typeof casicCanvas !== 'undefined') ? casicCanvas.getWidth() : 480;
+        const cH = (typeof casicCanvas !== 'undefined') ? casicCanvas.getHeight() : 360;
+        bodyContentHtml =
+            '<div style="flex:1; display:flex; align-items:center; justify-content:center; background:#1e1e1e; overflow:hidden;">' +
+            '<canvas id="popup-canvas" width="' + cW + '" height="' + cH + '" style="background:#fff; max-width:100%; max-height:100%; object-fit:contain;"></canvas>' +
+            '</div>';
     }
+
+    const hideToolbarCSS = (type === 'canvas') ? '.toolbar { display: none !important; }' : '';
 
     const htmlDoc =
         '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
@@ -176,7 +189,7 @@ function openPopupWindow(type) {
         '<style>' +
         ':root { --vscode-font: Menlo, Monaco, Consolas, "Courier New", monospace; --content-font-size: ' + initSize + 'px; --tab-size: ' + tabSizeVal + '; }' +
         'body { font-family: sans-serif; margin: 0; padding: 12px; background-color: #1e1e1e; color: #d4d4d4; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }' +
-        '.toolbar { display: flex; align-items: center; justify-content: space-between; background: #252526; padding: 8px 12px; border: 1px solid #444; border-radius: 6px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }' +
+        '.toolbar { display: flex; align-items: center; justify-content: space-between; background: #252526; padding: 8px 12px; border: 1px solid #444; border-radius: 6px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }' + hideToolbarCSS +
         '.font-controls { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #ccc; }' +
         '.size-btn { width: 28px; height: 26px; background: #3c3c3c; color: #fff; border: 1px solid #555; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 14px; }' +
         '.size-btn:hover { background: #007acc; border-color: #007acc; }' +
@@ -253,30 +266,33 @@ function openPopupWindow(type) {
     win.document.write(htmlDoc);
     win.document.close();
 
-    const slider = win.document.getElementById('font-slider');
-    const decBtn = win.document.getElementById('btn-font-dec');
-    const incBtn = win.document.getElementById('btn-font-inc');
-    const sizeLabel = win.document.getElementById('font-size-label');
+    // Canvasポップアップの場合はフォント調整リスナー不要なのでスキップ
+    if (type !== 'canvas') {
+        const slider = win.document.getElementById('font-slider');
+        const decBtn = win.document.getElementById('btn-font-dec');
+        const incBtn = win.document.getElementById('btn-font-inc');
+        const sizeLabel = win.document.getElementById('font-size-label');
 
-    function applyFontSize(newSize) {
-        const clamped = Math.max(10, Math.min(48, Number(newSize) || 16));
-        popupFontSizes[type] = clamped;
-        slider.value = String(clamped);
-        sizeLabel.textContent = clamped + 'px';
-        win.document.documentElement.style.setProperty('--content-font-size', clamped + 'px');
-        if (type === 'code') {
-            if (typeof setEditorFontSize === 'function') {
-                setEditorFontSize(clamped);
-            }
-            if (typeof win.updatePopupCodeLayout === 'function') {
-                win.updatePopupCodeLayout();
+        function applyFontSize(newSize) {
+            const clamped = Math.max(10, Math.min(48, Number(newSize) || 16));
+            popupFontSizes[type] = clamped;
+            slider.value = String(clamped);
+            sizeLabel.textContent = clamped + 'px';
+            win.document.documentElement.style.setProperty('--content-font-size', clamped + 'px');
+            if (type === 'code') {
+                if (typeof setEditorFontSize === 'function') {
+                    setEditorFontSize(clamped);
+                }
+                if (typeof win.updatePopupCodeLayout === 'function') {
+                    win.updatePopupCodeLayout();
+                }
             }
         }
-    }
 
-    slider.addEventListener('input', function() { applyFontSize(slider.value); });
-    decBtn.addEventListener('click', function() { applyFontSize(popupFontSizes[type] - 2); });
-    incBtn.addEventListener('click', function() { applyFontSize(popupFontSizes[type] + 2); });
+        slider.addEventListener('input', function() { applyFontSize(slider.value); });
+        decBtn.addEventListener('click', function() { applyFontSize(popupFontSizes[type] - 2); });
+        incBtn.addEventListener('click', function() { applyFontSize(popupFontSizes[type] + 2); });
+    }
 
     const chkWrap = win.document.getElementById('chk-wrap');
     if (chkWrap) {
@@ -551,7 +567,7 @@ function openPopupWindow(type) {
             if (!cmdInput) return;
             const mainCmdInput = document.getElementById('cmdline-input');
             if (mainCmdInput) mainCmdInput.value = cmdInput.value;
-            executeCommandLineString(cmdInput.value);
+            executeCommandLineStringAsync(cmdInput.value);
         }
         if (runBtn) runBtn.addEventListener('click', triggerPopupCmd);
         if (cmdInput) {
@@ -663,10 +679,32 @@ function syncPopupCmdline() {
     }
 }
 
+// Canvasのポップアップ同期関数
+function syncPopupCanvas() {
+    const win = popupWindows.canvas;
+    if (!win || win.closed) return;
+    const popupCanvas = win.document.getElementById('popup-canvas');
+    if (!popupCanvas) return;
+    const ctx = popupCanvas.getContext('2d');
+    
+    if (typeof casicCanvas !== 'undefined') {
+        const offCanvas = casicCanvas.getOffscreenCanvas();
+        if (offCanvas) {
+            if (popupCanvas.width !== offCanvas.width || popupCanvas.height !== offCanvas.height) {
+                popupCanvas.width = offCanvas.width;
+                popupCanvas.height = offCanvas.height;
+            }
+            ctx.clearRect(0, 0, popupCanvas.width, popupCanvas.height);
+            ctx.drawImage(offCanvas, 0, 0);
+        }
+    }
+}
+
 function syncSpecificPopup(type) {
     if (type === 'code') syncPopupCode();
     else if (type === 'input') syncPopupInput();
     else if (type === 'output') syncPopupOutput();
     else if (type === 'memory') syncPopupMemory();
     else if (type === 'cmdline') syncPopupCmdline();
+    else if (type === 'canvas') syncPopupCanvas();
 }
