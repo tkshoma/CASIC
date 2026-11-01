@@ -1206,28 +1206,42 @@ function executeGraphicsOrAudioCommand(cmdLower, restRaw, lineNum) {
     }
 
     if (cmdLower === 'g_rect') {
-        let d = {};
+        // ピクセルパーフェクトな直接座標指定モード (例: g_rect c, x1, y1, x2, y2)
         if (args.length >= 3) {
             const c = str(args[0], "#000000");
             const x1 = num(args[1], 0);
             const y1 = num(args[2], 0);
             const x2 = num(args[3], x1);
             const y2 = num(args[4], y1);
-            d = {
-                color: c,
-                x: (x1 + x2) / 2,
-                y: (y1 + y2) / 2,
-                w: Math.abs(x2 - x1),
-                h: Math.abs(y2 - y1),
-                fill: 1
-            };
-        } else {
-            if (args.length === 1) {
-                const v = evaluateExpression(args[0]);
-                if (isPlainDictObject(v)) d = v;
-            }
-            if (Object.keys(d).length === 0) d = getOptDict();
+
+            const left = Math.min(x1, x2);
+            const right = Math.max(x1, x2);
+            const bottom = Math.min(y1, y2);
+            const top = Math.max(y1, y2);
+
+            const w = right - left + 1;
+            const h = top - bottom + 1;
+
+            offCtx.save();
+            offCtx.globalAlpha = 1;
+            offCtx.fillStyle = c;
+            
+            // Y座標は Canvas では下方向が正。
+            // CASICの左下を原点とする仕様に合わせるため、top座標を変換して1px分ずらします。
+            const htmlCanvasY = casicCanvas.getHeight() - 1 - top;
+            
+            offCtx.fillRect(left, htmlCanvasY, w, h);
+            offCtx.restore();
+            return;
         }
+
+        // 辞書モード (d{})
+        let d = {};
+        if (args.length === 1) {
+            const v = evaluateExpression(args[0]);
+            if (isPlainDictObject(v)) d = v;
+        }
+        if (Object.keys(d).length === 0) d = getOptDict();
 
         const x = Number(d['x']) || 0;
         const y = Number(d['y']) || 0;

@@ -1,5 +1,5 @@
 // ==========================================
-// CASIC Canvas 描画エンジン (フローティングウィンドウ)
+// CASIC Canvas 描画エンジン (casic-canvas.js)
 // ==========================================
 
 const casicCanvas = (function() {
@@ -7,8 +7,6 @@ const casicCanvas = (function() {
     let headerEl = null;
     let canvasEl = null;
     let ctx = null;
-    
-    // 裏バッファ（描画コマンドはこちらに書き込み、frameで表に転送する）
     let offscreenCanvas = null;
     let offCtx = null;
     
@@ -17,26 +15,17 @@ const casicCanvas = (function() {
     let isAntiAlias = true;
     let isFullscreen = false;
 
-    // フローティングウィンドウのドラッグ状態
     let isDragging = false;
-    let dragStartX = 0;
-    let dragStartY = 0;
-    let winStartX = 0;
-    let winStartY = 0;
-
-    // Canvas領域の右ドラッグ状態（自由移動用）
+    let dragStartX = 0, dragStartY = 0, winStartX = 0, winStartY = 0;
     let isCanvasDragging = false;
 
     function init() {
         windowEl = document.getElementById('canvas-floating-window');
         headerEl = document.getElementById('canvas-floating-header');
         canvasEl = document.getElementById('casic-main-canvas');
-        
         if (!windowEl || !headerEl || !canvasEl) return;
 
         ctx = canvasEl.getContext('2d', { alpha: false });
-        
-        // 裏バッファの初期化
         offscreenCanvas = document.createElement('canvas');
         offscreenCanvas.width = canvasWidth;
         offscreenCanvas.height = canvasHeight;
@@ -44,63 +33,30 @@ const casicCanvas = (function() {
         
         resetCanvasState();
 
-        // ヘッダーでのドラッグイベント設定（左クリック）
-        headerEl.addEventListener('pointerdown', function(e) {
-            if (e.button !== 0 || isFullscreen) return; // 左クリック以外、または全画面時は無視
-            startDrag(e);
-        });
-        
-        // Canvas領域でのドラッグイベント設定（右クリック）
-        canvasEl.addEventListener('pointerdown', function(e) {
-            if (e.button !== 2 || isFullscreen) return; // 右クリック以外、または全画面時は無視
-            isCanvasDragging = true;
-            startDrag(e);
-            canvasEl.style.cursor = 'grabbing';
-        });
-
-        // 共通のドラッグ移動・終了処理
+        headerEl.addEventListener('pointerdown', function(e) { if (e.button !== 0 || isFullscreen) return; startDrag(e); });
+        canvasEl.addEventListener('pointerdown', function(e) { if (e.button !== 2 || isFullscreen) return; isCanvasDragging = true; startDrag(e); canvasEl.style.cursor = 'grabbing'; });
         document.addEventListener('pointermove', onDragMove);
         document.addEventListener('pointerup', onDragEnd);
-        
-        // 右クリック時のコンテキストメニューを無効化（右ドラッグ用）
-        canvasEl.addEventListener('contextmenu', function(e) {
-            e.preventDefault();
-        });
+        canvasEl.addEventListener('contextmenu', e => e.preventDefault());
 
-        // Canvasの全画面ボタン処理
         const fsBtn = document.getElementById('btn-canvas-fullscreen');
-        if (fsBtn) {
-            fsBtn.addEventListener('click', toggleFullscreen);
-        }
-        
-        // Escapeキーで全画面解除
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && isFullscreen) {
-                toggleFullscreen();
-            }
-        });
+        if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape' && isFullscreen) toggleFullscreen(); });
     }
 
     function startDrag(e) {
         isDragging = true;
-        dragStartX = e.clientX;
-        dragStartY = e.clientY;
+        dragStartX = e.clientX; dragStartY = e.clientY;
         const rect = windowEl.getBoundingClientRect();
-        winStartX = rect.left;
-        winStartY = rect.top;
-        e.preventDefault(); // テキスト選択などを防ぐ
+        winStartX = rect.left; winStartY = rect.top;
+        e.preventDefault();
     }
 
     function onDragMove(e) {
         if (!isDragging) return;
-        const dx = e.clientX - dragStartX;
-        const dy = e.clientY - dragStartY;
-        
-        // 画面外に完全に消えないように制限
-        let newX = winStartX + dx;
-        let newY = winStartY + dy;
-        const maxX = window.innerWidth - 40;
-        const maxY = window.innerHeight - 40;
+        const dx = e.clientX - dragStartX, dy = e.clientY - dragStartY;
+        let newX = winStartX + dx, newY = winStartY + dy;
+        const maxX = window.innerWidth - 40, maxY = window.innerHeight - 40;
         
         if (newX > maxX) newX = maxX;
         if (newY > maxY) newY = maxY;
@@ -112,63 +68,48 @@ const casicCanvas = (function() {
     }
 
     function onDragEnd() {
-        if (isDragging) {
-            isDragging = false;
-        }
-        if (isCanvasDragging) {
-            isCanvasDragging = false;
-            canvasEl.style.cursor = 'default';
-        }
+        if (isDragging) isDragging = false;
+        if (isCanvasDragging) { isCanvasDragging = false; canvasEl.style.cursor = 'default'; }
     }
 
     function toggleVisibility() {
         if (!windowEl) init();
         if (!windowEl) return;
-        
         if (windowEl.classList.contains('hidden')) {
             windowEl.classList.remove('hidden');
-            // 全画面モードでなければ画面中央付近に配置
             if (!isFullscreen) {
                 const rect = windowEl.getBoundingClientRect();
                 const cx = Math.max(10, (window.innerWidth - rect.width) / 2);
                 const cy = Math.max(10, (window.innerHeight - rect.height) / 2);
-                windowEl.style.left = cx + 'px';
-                windowEl.style.top = cy + 'px';
+                windowEl.style.left = cx + 'px'; windowEl.style.top = cy + 'px';
             }
         } else {
             windowEl.classList.add('hidden');
-            // 非表示時は全画面モードも解除
-            if (isFullscreen) {
-                toggleFullscreen();
-            }
+            if (isFullscreen) toggleFullscreen();
         }
     }
 
     function show() {
         if (!windowEl) init();
-        if (windowEl && windowEl.classList.contains('hidden')) {
-            toggleVisibility();
-        }
+        if (windowEl && windowEl.classList.contains('hidden')) toggleVisibility();
     }
 
-    // 全画面表示の切り替え
     function toggleFullscreen() {
         if (!windowEl) return;
-        
         isFullscreen = !isFullscreen;
-        
         if (isFullscreen) {
             windowEl.classList.add('canvas-fullscreen');
-            adjustCanvasScale();
+            adjustCanvasScale(); 
             window.addEventListener('resize', adjustCanvasScale);
         } else {
             windowEl.classList.remove('canvas-fullscreen');
             window.removeEventListener('resize', adjustCanvasScale);
-            canvasEl.style.transform = '';
+            canvasEl.style.transform = ''; 
             canvasEl.style.transformOrigin = 'top left';
-            windowEl.style.width = '';
+            windowEl.style.width = ''; 
             windowEl.style.height = '';
         }
+        updateVisualScale();
     }
     
     function adjustCanvasScale() {
@@ -179,6 +120,30 @@ const casicCanvas = (function() {
         
         canvasEl.style.transformOrigin = 'center center';
         canvasEl.style.transform = `scale(${scale})`;
+        
+        // CSSのscaleで拡大するため、元の物理サイズは維持する
+        canvasEl.style.width = canvasWidth + 'px';
+        canvasEl.style.height = canvasHeight + 'px';
+    }
+
+    // 新規追加：10x10など極小サイズの時にUIとして操作できるように最低限のサイズに拡大する
+    function updateVisualScale() {
+        if (!canvasEl) return;
+        if (isFullscreen) return; // 全画面時はスケール変形が優先される
+        
+        // 少なくとも240pxの操作領域を確保
+        const MIN_SIZE = 240;
+        let displayW = canvasWidth;
+        let displayH = canvasHeight;
+        
+        if (canvasWidth < MIN_SIZE || canvasHeight < MIN_SIZE) {
+            const scale = Math.max(MIN_SIZE / canvasWidth, MIN_SIZE / canvasHeight);
+            displayW = Math.round(canvasWidth * scale);
+            displayH = Math.round(canvasHeight * scale);
+        }
+        
+        canvasEl.style.width = displayW + 'px';
+        canvasEl.style.height = displayH + 'px';
     }
 
     // ぼやけ対策 (Canvasサイズが小さい時、または g_smooth false の時はくっきり表示する)
@@ -189,13 +154,12 @@ const casicCanvas = (function() {
         if (canvasEl) {
             canvasEl.style.imageRendering = renderStyle;
         }
+        // 別窓側のキャンバスにも適用
         if (typeof popupWindows !== 'undefined' && popupWindows.canvas && !popupWindows.canvas.closed) {
             const pCanv = popupWindows.canvas.document.getElementById('popup-canvas');
             if (pCanv) pCanv.style.imageRendering = renderStyle;
         }
     }
-
-    // --- CASIC描画API ---
 
     function resetCanvasState() {
         if (!offCtx) return;
@@ -209,39 +173,26 @@ const casicCanvas = (function() {
         canvasWidth = Math.max(1, Math.trunc(w));
         canvasHeight = Math.max(1, Math.trunc(h));
         
-        if (canvasEl) {
-            canvasEl.width = canvasWidth;
-            canvasEl.height = canvasHeight;
-        }
-        if (offscreenCanvas) {
-            offscreenCanvas.width = canvasWidth;
-            offscreenCanvas.height = canvasHeight;
-        }
+        if (canvasEl) { canvasEl.width = canvasWidth; canvasEl.height = canvasHeight; }
+        if (offscreenCanvas) { offscreenCanvas.width = canvasWidth; offscreenCanvas.height = canvasHeight; }
         
         const titleEl = document.getElementById('canvas-title');
-        if (titleEl) {
-            titleEl.textContent = 'Canvas (' + canvasWidth + 'x' + canvasHeight + ')';
-        }
+        if (titleEl) titleEl.textContent = 'Canvas (' + canvasWidth + 'x' + canvasHeight + ')';
         
         if (isFullscreen) {
             adjustCanvasScale();
         }
-        
+        updateVisualScale();
         updateImageRendering();
         
-        // サイズ変更時は画面を白紙に初期化して即座に反映する
         clear('#ffffff');
         flush();
     }
 
     function setSmooth(isSmooth) {
         isAntiAlias = !!isSmooth;
-        if (offCtx) {
-            offCtx.imageSmoothingEnabled = isAntiAlias;
-        }
-        if (ctx) {
-            ctx.imageSmoothingEnabled = isAntiAlias;
-        }
+        if (offCtx) offCtx.imageSmoothingEnabled = isAntiAlias;
+        if (ctx) ctx.imageSmoothingEnabled = isAntiAlias;
         updateImageRendering();
     }
 
@@ -253,25 +204,18 @@ const casicCanvas = (function() {
         offCtx.restore();
     }
 
-    // 表のCanvasに転送 (frame命令、または実行終了時・ステップ時に呼ばれる)
     function flush() {
         if (!ctx || !offscreenCanvas) return;
         ctx.drawImage(offscreenCanvas, 0, 0);
         
-        if (typeof syncPopupCanvas === 'function') {
-            syncPopupCanvas();
-        }
+        if (typeof syncPopupCanvas === 'function') syncPopupCanvas();
         updateImageRendering();
     }
 
-    // 座標変換ヘルパー: 左下(0,0) → 左上(0,0)
-    function transformY(casicY) {
-        return canvasHeight - casicY;
-    }
+    function transformY(casicY) { return canvasHeight - casicY; }
 
-    // 取得用関数 (g_color用)
     function getPixelColorHex(x, y) {
-        if (!offCtx) return "#ffffff"; // 真っ白をデフォルトに
+        if (!offCtx) return "#ffffff"; // デフォルトを白に修正
         const cx = Math.trunc(x);
         const cy = Math.trunc(transformY(y));
         if (cx < 0 || cx >= canvasWidth || cy < 0 || cy >= canvasHeight) return "#ffffff";
@@ -283,23 +227,13 @@ const casicCanvas = (function() {
         return '#' + r + g + b;
     }
 
-    // --- 外部公開API ---
     return {
-        init: init,
-        toggleVisibility: toggleVisibility,
-        show: show,
-        toggleFullscreen: toggleFullscreen,
-        reset: resetCanvasState,
-        setSize: setSize,
-        setSmooth: setSmooth,
-        clear: clear,
-        flush: flush,
-        transformY: transformY,
-        getPixelColorHex: getPixelColorHex,
+        init: init, toggleVisibility: toggleVisibility, show: show, toggleFullscreen: toggleFullscreen,
+        reset: resetCanvasState, setSize: setSize, setSmooth: setSmooth, clear: clear, flush: flush,
+        transformY: transformY, getPixelColorHex: getPixelColorHex,
         getOffscreenCtx: function() { return offCtx; },
-        getOffscreenCanvas: function() { return offscreenCanvas; }, // 別窓転送用
-        getWidth: function() { return canvasWidth; },
-        getHeight: function() { return canvasHeight; }
+        getOffscreenCanvas: function() { return offscreenCanvas; },
+        getWidth: function() { return canvasWidth; }, getHeight: function() { return canvasHeight; }
     };
 })();
 

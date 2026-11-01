@@ -1,6 +1,7 @@
 // ==========================================
-// 0. コード取得ユーティリティ
+// CASIC 実行エンジン (casic-engine.js)
 // ==========================================
+
 function getMainCodeLinesArray() {
     const codeEl = document.getElementById('code');
     if (!codeEl) return [];
@@ -724,6 +725,7 @@ async function executeStatementAsync(stmtRaw, lineNum) {
         }
 
         if (restTrimmed.startsWith('(') && Object.prototype.hasOwnProperty.call(state.functions, rawCmdLower)) {
+            // 式としての呼び出しは同期（wait不可）となる
             evaluateExpression(trimmed);
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
@@ -1190,9 +1192,6 @@ async function executeCasicCodeAsync(rawCode, startLineOffset = 1, isSubOrCmd = 
     let allErrors = labelScan.errors.concat(cfStructure.errors);
     const labelMap = labelScan.labels;
 
-    const localForStates = {};
-    const mainForStates = state.forStates;
-
     const MAX_LINE_TRANSITIONS = 100000;
     let transitions = 0;
     let lineIdx = 0;
@@ -1212,17 +1211,7 @@ async function executeCasicCodeAsync(rawCode, startLineOffset = 1, isSubOrCmd = 
             break;
         }
 
-        const info = cfStructure.lineInfos[lineIdx] || { kind: 'normal' };
-        let stepRes = null;
-
-        if (info.kind === 'for_multi' || info.kind === 'end') {
-            state.forStates = localForStates;
-            stepRes = await executeLineWithControlFlowAsync(lineIdx, lines, startLineOffset, labelMap, cfStructure, evalBranchFlag);
-            state.forStates = mainForStates;
-        } else {
-            state.forStates = mainForStates;
-            stepRes = await executeLineWithControlFlowAsync(lineIdx, lines, startLineOffset, labelMap, cfStructure, evalBranchFlag);
-        }
+        const stepRes = await executeLineWithControlFlowAsync(lineIdx, lines, startLineOffset, labelMap, cfStructure, evalBranchFlag);
 
         totalOutput += stepRes.output;
         if (stepRes.errors.length > 0) {
@@ -1234,6 +1223,5 @@ async function executeCasicCodeAsync(rawCode, startLineOffset = 1, isSubOrCmd = 
         evalBranchFlag = stepRes.nextEvalBranch;
     }
 
-    state.forStates = mainForStates;
     return { output: totalOutput, errors: allErrors, warnings: state.warnings.slice() };
 }
