@@ -87,7 +87,6 @@ function executeStatementSync(stmtRaw, lineNum) {
         const rest = trimmed.slice(cmdLen);
         const restTrimmed = cleanText(rest);
 
-        // --- 描画・音声コマンドの割り込み ---
         if (['g_size', 'g_smooth', 'g_clear', 'g_line', 'g_poly', 'g_rect', 'g_circle', 'g_image', 'g_text', 'a_play', 'a_stop'].indexOf(cmdLower) !== -1) {
             if (typeof executeGraphicsOrAudioCommand === 'function') {
                 executeGraphicsOrAudioCommand(cmdLower, rest, lineNum);
@@ -209,10 +208,12 @@ function executeStatementSync(stmtRaw, lineNum) {
         if (cmdLower === 'charin') { executeCharinCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'allin') { executeAllinCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'resetin') { executeResetinCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
+        
         if (cmdLower === 'out' || cmdLower === 'put') {
             const outStr = executeOutputCommand(cmdLower, rest);
             return { output: flushFunctionOutput(outStr), error: null, action: null };
         }
+        
         if (cmdLower === 'sort' || cmdLower === 'dsort' || cmdLower === 'rev') { executeSortOrRevCommand(cmdLower, rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'push') { executePushInsAddCommand(rawCmdLower, rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'replace') { executeReplaceCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
@@ -492,7 +493,7 @@ async function executeStatementAsync(stmtRaw, lineNum) {
             if (restTrimmed !== '') return { output: '', error: 'tick命令に引数は指定できません', action: null };
             state.lastTickTime = performance.now();
             resetKeyTickState();
-            // ★追加: tickの度にUI（出力とメモリ）を更新
+            // ★追加: tickの度にUI（出力とメモリ）を更新。出力バッファ自体はクリアしない。
             if (typeof renderMainOutputBox === 'function') renderMainOutputBox();
             if (typeof renderMemoryUI === 'function') renderMemoryUI();
             if (typeof syncPopupOutput === 'function') syncPopupOutput();
@@ -561,7 +562,7 @@ async function executeStatementAsync(stmtRaw, lineNum) {
                 ms = Math.max(0, Math.trunc(parseCasicNumber(val).num));
             }
             if (!state.isStepMode) {
-                // ★追加: waitの前にUI（出力とメモリ）を更新して、待機中も最新状態が見えるようにする
+                // ★追加: waitの前にUI（出力とメモリ）を更新して待機中も最新状態が見えるようにする
                 if (typeof renderMainOutputBox === 'function') renderMainOutputBox();
                 if (typeof renderMemoryUI === 'function') renderMemoryUI();
                 if (typeof syncPopupOutput === 'function') syncPopupOutput();
@@ -689,14 +690,16 @@ async function executeStatementAsync(stmtRaw, lineNum) {
         if (cmdLower === 'charin') { executeCharinCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'allin') { executeAllinCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'resetin') { executeResetinCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
+        
         if (cmdLower === 'out' || cmdLower === 'put') {
             const outStr = executeOutputCommand(cmdLower, rest);
-            // out/put を実行した直後もバッファに追加されるので、ここで最新の state.outputBuffer に足し込んでUI更新しておく
+            // ★変更: ここでは state.outputBuffer に追加するだけでなく、UIを更新する
             state.outputBuffer += outStr;
             if (typeof renderMainOutputBox === 'function') renderMainOutputBox();
             if (typeof syncPopupOutput === 'function') syncPopupOutput();
-            return { output: flushFunctionOutput(''), error: null, action: null };
+            return { output: flushFunctionOutput(''), error: null, action: null }; // output自体は空を返して呼び出し元での二重追加を防ぐ
         }
+        
         if (cmdLower === 'sort' || cmdLower === 'dsort' || cmdLower === 'rev') { executeSortOrRevCommand(cmdLower, rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'push') { executePushInsAddCommand(rawCmdLower, rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'replace') { executeReplaceCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
@@ -1202,6 +1205,7 @@ async function executeCasicCodeAsync(rawCode, startLineOffset = 1, isSubOrCmd = 
     let allErrors = labelScan.errors.concat(cfStructure.errors);
     const labelMap = labelScan.labels;
 
+    // ★ localForStatesの切り替え処理を削除し、グローバルステートを直接参照 ★
     const MAX_LINE_TRANSITIONS = 100000;
     let transitions = 0;
     let lineIdx = 0;
