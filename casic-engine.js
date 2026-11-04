@@ -419,8 +419,6 @@ function invokeUserDefinedFunction(funcDef, argResults) {
         state.forStates = savedForStates;
     }
 }
-
-
 // ==========================================
 // 3. [非同期] メイン実行エンジン (wait 等に対応)
 // ==========================================
@@ -494,6 +492,10 @@ async function executeStatementAsync(stmtRaw, lineNum) {
             if (restTrimmed !== '') return { output: '', error: 'tick命令に引数は指定できません', action: null };
             state.lastTickTime = performance.now();
             resetKeyTickState();
+            // ★追加: tickの度にUI（出力とメモリ）を更新
+            if (typeof renderMainOutputBox === 'function') renderMainOutputBox();
+            if (typeof renderMemoryUI === 'function') renderMemoryUI();
+            if (typeof syncPopupOutput === 'function') syncPopupOutput();
             return { output: flushFunctionOutput(''), error: null, action: null };
         }
         if (cmdLower === 'frame' && (rest === '' || isSpaceChar(rest[0]))) {
@@ -559,6 +561,10 @@ async function executeStatementAsync(stmtRaw, lineNum) {
                 ms = Math.max(0, Math.trunc(parseCasicNumber(val).num));
             }
             if (!state.isStepMode) {
+                // ★追加: waitの前にUI（出力とメモリ）を更新して、待機中も最新状態が見えるようにする
+                if (typeof renderMainOutputBox === 'function') renderMainOutputBox();
+                if (typeof renderMemoryUI === 'function') renderMemoryUI();
+                if (typeof syncPopupOutput === 'function') syncPopupOutput();
                 await sleepAsync(ms);
             }
             return { output: flushFunctionOutput(''), error: null, action: null };
@@ -685,7 +691,11 @@ async function executeStatementAsync(stmtRaw, lineNum) {
         if (cmdLower === 'resetin') { executeResetinCommand(rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'out' || cmdLower === 'put') {
             const outStr = executeOutputCommand(cmdLower, rest);
-            return { output: flushFunctionOutput(outStr), error: null, action: null };
+            // out/put を実行した直後もバッファに追加されるので、ここで最新の state.outputBuffer に足し込んでUI更新しておく
+            state.outputBuffer += outStr;
+            if (typeof renderMainOutputBox === 'function') renderMainOutputBox();
+            if (typeof syncPopupOutput === 'function') syncPopupOutput();
+            return { output: flushFunctionOutput(''), error: null, action: null };
         }
         if (cmdLower === 'sort' || cmdLower === 'dsort' || cmdLower === 'rev') { executeSortOrRevCommand(cmdLower, rest); return { output: flushFunctionOutput(''), error: null, action: null }; }
         if (cmdLower === 'push') { executePushInsAddCommand(rawCmdLower, rest); return { output: flushFunctionOutput(''), error: null, action: null }; }

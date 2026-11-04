@@ -177,7 +177,7 @@ function openPopupWindow(type) {
         const cH = (typeof casicCanvas !== 'undefined') ? casicCanvas.getHeight() : 360;
         bodyContentHtml =
             '<div style="flex:1; display:flex; align-items:center; justify-content:center; background:#1e1e1e; overflow:hidden;">' +
-            '<canvas id="popup-canvas" width="' + cW + '" height="' + cH + '" style="background:#fff; max-width:100%; max-height:100%; object-fit:contain;"></canvas>' +
+            '<canvas id="popup-canvas" width="' + cW + '" height="' + cH + '" style="background:#fff; width:100%; height:100%; object-fit:contain; image-rendering:pixelated;"></canvas>' +
             '</div>';
     }
 

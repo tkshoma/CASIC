@@ -1231,10 +1231,10 @@ canvas#casic-main-canvas {
     height: 100vh !important;
     border: none;
     border-radius: 0;
-    z-index: 1050; 
+    z-index: 1050; /* ほかのすべての要素より前面に */
 }
 .floating-window.canvas-fullscreen .floating-header {
-    display: none; 
+    display: none; /* 全画面時はヘッダーを隠す */
 }
 .floating-window.canvas-fullscreen .floating-body {
     display: flex;
@@ -1242,7 +1242,7 @@ canvas#casic-main-canvas {
     justify-content: center;
     width: 100%;
     height: 100%;
-    background-color: #000; 
+    background-color: #000; /* 全画面時は背景を黒に */
 }
 .floating-window.canvas-fullscreen canvas#casic-main-canvas {
     position: static;

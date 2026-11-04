@@ -1206,7 +1206,7 @@ function executeGraphicsOrAudioCommand(cmdLower, restRaw, lineNum) {
     }
 
     if (cmdLower === 'g_rect') {
-        // ピクセルパーフェクトな直接座標指定モード (例: g_rect c, x1, y1, x2, y2)
+        // ★ バグ修正箇所：数学的な -w/2 による半端なピクセル（アンチエイリアス）を排除し、指定ピクセルをピッタリ塗るように修正
         if (args.length >= 3) {
             const c = str(args[0], "#000000");
             const x1 = num(args[1], 0);
@@ -1435,8 +1435,6 @@ function executeGraphicsOrAudioCommand(cmdLower, restRaw, lineNum) {
             }
         }
 
-        // HTML CanvasのY軸は下方向。CASICではYが増えると上方向だが
-        // 文字列の複数行は下へ進むのが自然なので Canvas Y を足していく。
         let currentY = 0;
         if (vAlign === 'middle') {
             currentY = - (drawLines.length - 1) * lineH / 2;

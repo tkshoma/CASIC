@@ -237,7 +237,8 @@ function buildControlFlowStructure(lines, startLineOffset = 1, registerFunctions
                 });
             }
         } else if (info.kind === 'end') {
-            const top = stack.length > 0 ? stack[stack.length - 1] : null;
+            // ★ ここがバグの原因でした（stack.pop() に修正し、正しくブロックを閉じるようにしました）
+            const top = stack.length > 0 ? stack.pop() : null;
             if (!top) {
                 errors.push('[Line ' + lineNum + '] 対応するif, for, while, funがない余分なendがあります');
             } else {
@@ -315,7 +316,6 @@ function resolveBreakTargetLine(lineIdx, count, cfStructure, totalLines) {
 
 // ==========================================
 // 3. ラベル（to / go）解析 
-// （※欠落してエラーの原因になっていた関数群）
 // ==========================================
 
 function parseToLabelLiteral(rawArg, lineNum) {

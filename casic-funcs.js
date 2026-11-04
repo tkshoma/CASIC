@@ -950,11 +950,18 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         const keyStr = toDisplayString(args[1]);
         return Object.prototype.hasOwnProperty.call(dictObj, keyStr) ? "1" : "0";
     }
+    
+    // ★ ここで「辞書のキー一覧」と「押されているキー一覧」を統合して処理 ★
     if (funcNameLower === 'keys') {
-        if (args.length === 0) return [];
+        if (args.length === 0) {
+            const arr = [];
+            keyInputState.current.forEach(function(k) { arr.push(k); });
+            return arr;
+        }
         const dictObj = resolveArgAsDict(argResults[0]);
         return Object.keys(dictObj);
     }
+    
     if (funcNameLower === 'json') {
         if (args.length === 0) return "{}";
         const dictObj = resolveArgAsDict(argResults[0]);
@@ -1005,15 +1012,9 @@ function callBuiltinFunction(rawFuncNameLower, argResults) {
         const kStr = toDisplayString(args[0]).toLowerCase();
         return keyInputState.releasedSinceLastTick.has(kStr) ? "1" : "0";
     }
-    if (funcNameLower === 'keys') {
-        const arr = [];
-        keyInputState.current.forEach(function(k) { arr.push(k); });
-        return arr;
-    }
 
     // 11. その他の関数 (g_color, fps, tps)
     if (funcNameLower === 'g_color') {
-        // [TODO: Canvas未実装のため、仮で #000000 を返す]
         return "#000000";
     }
     if (funcNameLower === 'fps') {

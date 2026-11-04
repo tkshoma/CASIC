@@ -341,9 +341,7 @@ const FUNCTION_ALIASES = {
     'l_bs': 'bs',
     'l_uniq': 'uniq',
     'd_has': 'has',
-    'key': 'keys',
     'd_keys': 'keys',
-    'd_key': 'keys',
     'd_json': 'json',
     'd_g_shape': 'g_shape',
     'd_g_image': 'g_image',
@@ -399,7 +397,7 @@ const BUILTIN_FUNCTION_NAMES = new Set([
     'unescape', 's_unescape', 'base64', 'unbase64',
     'at', 's_at', 'l_at', 'd_at',
     'join', 'l_join', 'grid', 'l_grid', 'flat', 'l_flat', 'bs', 'l_bs', 'uniq', 'l_uniq',
-    'has', 'd_has', 'keys', 'key', 'd_keys', 'd_key', 'json', 'd_json',
+    'has', 'd_has', 'keys', 'key', 'd_keys', 'json', 'd_json',
     'g_shape', 'd_g_shape', 'g_image', 'd_g_image', 'g_text', 'd_g_text', 'g_color',
     'a_sound', 'd_a_sound',
     'key', 'key_up', 'key_down', 'keys', 'fps', 'tps'

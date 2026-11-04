@@ -106,8 +106,8 @@ const casicCanvas = (function() {
             window.removeEventListener('resize', adjustCanvasScale);
             canvasEl.style.transform = ''; 
             canvasEl.style.transformOrigin = 'top left';
-            windowEl.style.width = ''; 
-            windowEl.style.height = '';
+            canvasEl.style.width = ''; 
+            canvasEl.style.height = '';
         }
         updateVisualScale();
     }
@@ -126,10 +126,10 @@ const casicCanvas = (function() {
         canvasEl.style.height = canvasHeight + 'px';
     }
 
-    // 新規追加：10x10など極小サイズの時にUIとして操作できるように最低限のサイズに拡大する
+    // ★新規追加: 解像度が10x10等の時に、UIが極小になって操作できなくなるのを防ぐ
     function updateVisualScale() {
         if (!canvasEl) return;
-        if (isFullscreen) return; // 全画面時はスケール変形が優先される
+        if (isFullscreen) return; // 全画面時はスケール変形が優先
         
         // 少なくとも240pxの操作領域を確保
         const MIN_SIZE = 240;
@@ -146,7 +146,7 @@ const casicCanvas = (function() {
         canvasEl.style.height = displayH + 'px';
     }
 
-    // ぼやけ対策 (Canvasサイズが小さい時、または g_smooth false の時はくっきり表示する)
+    // ★新規追加: ぼやけ対策 (Canvasサイズが小さい時、または g_smooth false の時はくっきり表示する)
     function updateImageRendering() {
         const isSmall = (canvasWidth <= 240 || canvasHeight <= 240);
         const renderStyle = (!isAntiAlias || isSmall) ? 'pixelated' : 'auto';
